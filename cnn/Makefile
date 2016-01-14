@@ -54,7 +54,7 @@ endif
 CXX := arm-linux-gnueabihf-g++
 
 # Target
-TARGET := channelizer
+TARGET := cnn
 TARGET_DIR := ./
 
 # Directories

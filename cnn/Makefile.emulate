@@ -55,7 +55,7 @@ endif
 CXX := g++
 
 # Target
-TARGET := channelizer
+TARGET := cnn
 TARGET_DIR := ./
 
 # Directories
