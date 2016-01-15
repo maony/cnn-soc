@@ -45,14 +45,36 @@
 #include "ref_cnn.hpp"
 using namespace aocl_utils;
 
+#define IM2COL
+#define GEMM
+//define MAX_POOLING
+//define RELU
+
 // The set of simultaneous kernels
 enum KERNELS {
-  K_IM2COL,
-  K_NUM_KERNELS
+#ifdef IM2COL
+    K_IM2COL,
+#endif
+#ifdef GEMM
+    K_GEMM,
+#endif
+#ifdef MAX_POOLING
+    K_MAX_POOLING,
+#endif
+    K_NUM_KERNELS
 };
-static const char* kernel_names[K_NUM_KERNELS] =
+static const char* kernel_names[K_NUM_KERNELS+1] =
 {
-  "im2col"
+#ifdef IM2COL
+    "im2col",
+#endif
+#ifdef GEMM
+    "gemm",
+#endif
+#ifdef MAX_POOLING
+    "max_pooling",
+#endif
+    "null"
 };
 
 // ACL runtime configuration
@@ -69,7 +91,17 @@ bool init();
 void cleanup();
 bool approximatelyEqual(float a, float b, float epsilon);
 bool im2col_test();
-extern void ref_lenet(void);
+void lenet_test(int sel);
+
+#ifdef MAX_POOLING
+void ocl_pooling_max_layer(const blob_shape_t src, const conv_param_t param, const int kernel_h, const int kernel_w, blob_shape_t dst);
+#endif
+void (*pfunc_pooling)(const blob_shape_t src, const conv_param_t param, const int kernel_h, const int kernel_w, blob_shape_t dst);
+
+#if defined(IM2COL) && defined(GEMM)
+void ocl_conv_layer(const blob_shape_t src, const blob_shape_t filter, blob_shape_t dst, const conv_param_t param);
+#endif
+void (*pfunc_conv)(const blob_shape_t src, const blob_shape_t filter, blob_shape_t dst, const conv_param_t param);
 
 // Entry point.
 int main(int argc, char **argv) {
@@ -84,9 +116,23 @@ int main(int argc, char **argv) {
     }
     printf("-----------Init complete!-------------\n");
     printf("--------------------------------------\n");
-    
-    im2col_test();
+   
+    pfunc_pooling   = pooling_max_layer;
+    pfunc_conv      = conv_layer;
+    if(1) {
+#if defined(IM2COL) && defined(GEMM)
+        printf("----ocl conv----\n");
+        pfunc_conv      = ocl_conv_layer;
+#endif
+#ifdef MAX_POOLING
+        printf("----ocl max pooling----\n");
+        pfunc_pooling   = ocl_pooling_max_layer;
+#endif
+    }
+
+    //im2col_test();
     //ref_lenet();
+    lenet_test(1);
 
     printf("--------------------------------------\n");
     printf("-----------test complete!-------------\n");
@@ -95,7 +141,301 @@ int main(int argc, char **argv) {
     cleanup();
     return 0;
 }
+void lenet_test(int file_sel) {
 
+	blob_shape_t conv1_data, conv1_filter, conv1_out;
+	conv_param_t conv1_param;
+	float        *conv1_bias;
+	uint         offset = 0;
+	blob_shape_t pool1_out;
+	conv_param_t pool1_param;
+	blob_shape_t conv2_filter, conv2_out;
+	conv_param_t conv2_param;
+	float        *conv2_bias;
+	blob_shape_t pool2_out;
+	conv_param_t pool2_param;
+	float        *inner1_weight, *inner1_bias, *inner1_out;
+	float        *relu1_out;
+	float        *inner2_weight, *inner2_bias, *inner2_out;
+	float        *soft1_out;
+	FILE         *fp_data, *fp_model;
+
+	fp_data     = fopen("data-all.bin", "rb");
+	fp_model    = fopen("model.bin", "rb");
+	
+    // Convolution layer 1
+	// num:20, kernel:5, stride:1
+	// parameter, weight: 5*5*20; bias:20
+	conv1_data.num = 1;
+	conv1_data.channels = 1;
+	conv1_data.height = 28;
+	conv1_data.width = 28;
+	conv1_data.data = (float *)alignedMalloc(conv1_data.num*conv1_data.channels*conv1_data.height*conv1_data.width*sizeof(float));
+	// =============================================================
+	// TODO: load data in
+	fseek(fp_data, sizeof(float)*file_sel*28*28, 0);
+	fread(conv1_data.data, sizeof(float), conv1_data.num*conv1_data.channels*conv1_data.height*conv1_data.width, fp_data);
+	// =============================================================
+
+	conv1_filter.num = 20;
+	conv1_filter.channels = 1;
+	conv1_filter.height = 5;
+	conv1_filter.width = 5;
+	conv1_filter.data = (float *)alignedMalloc(conv1_filter.num*conv1_filter.channels*conv1_filter.height*conv1_filter.width*sizeof(float));
+	conv1_param.pad_w = 0;
+	conv1_param.pad_h = 0;
+	conv1_param.stride_w = 1;
+	conv1_param.stride_h = 1;
+	conv1_out.num = 1;
+	conv1_out.channels = 20;
+	conv1_out.height = (conv1_data.height + 2 * conv1_param.pad_h - conv1_filter.height) / conv1_param.stride_h + 1;
+	conv1_out.width = (conv1_data.width + 2 * conv1_param.pad_w - conv1_filter.width) / conv1_param.stride_w + 1;
+	conv1_out.data = (float *)alignedMalloc(conv1_out.num*conv1_out.channels*conv1_out.height*conv1_out.width*sizeof(float));
+
+	conv1_bias = (float *)alignedMalloc(20 * sizeof(float));
+
+	load_model_param(fp_model, offset, 5 * 5 * 20, conv1_filter.data);
+	offset += 5 * 5 * 20;
+	load_model_param(fp_model, offset, 20, conv1_bias);
+	offset += 20;
+	// 20X(5*5), 25X(24*24)
+	pfunc_conv(conv1_data, conv1_filter, conv1_out, conv1_param);
+	conv_bias(conv1_out.data, conv1_out.channels, conv1_out.height*conv1_out.width, conv1_bias);
+
+	// max-pooling layer 1
+	// kernel: 2, stride: 2
+	pool1_param.pad_w = 0;
+	pool1_param.pad_h = 0;
+	pool1_param.stride_w = 2;
+	pool1_param.stride_h = 2;
+	pool1_out.num = 1;
+	pool1_out.channels = 20;
+	pool1_out.height = (conv1_out.height + 2 * pool1_param.pad_h - pool1_param.stride_h) / pool1_param.stride_h + 1;
+	pool1_out.width = (conv1_out.width + 2 * pool1_param.pad_w - pool1_param.stride_w) / pool1_param.stride_w + 1;
+	pool1_out.data = (float *)alignedMalloc(pool1_out.num*pool1_out.channels*pool1_out.height*pool1_out.width*sizeof(float));
+	pfunc_pooling(conv1_out, pool1_param, pool1_param.stride_h, pool1_param.stride_w, pool1_out);
+
+	// Convolution layer 2
+	// num:50, kernel:5, stride:1
+	// parameter, weight: 5*5*20; bias:50
+	conv2_filter.num = 50+2;
+	conv2_filter.channels = 20;
+	conv2_filter.height = 5;
+	conv2_filter.width = 5;
+	conv2_filter.data = (float *)alignedMalloc((conv2_filter.num)*conv2_filter.channels*conv2_filter.height*conv2_filter.width*sizeof(float));
+	conv2_param.pad_w = 0;
+	conv2_param.pad_h = 0;
+	conv2_param.stride_w = 1;
+	conv2_param.stride_h = 1;
+	conv2_out.num = 1;
+	conv2_out.channels = 50;
+	conv2_out.height = (pool1_out.height + 2 * conv2_param.pad_h - conv2_filter.height) / conv2_param.stride_h + 1;
+	conv2_out.width = (pool1_out.width + 2 * conv2_param.pad_w - conv2_filter.width) / conv2_param.stride_w + 1;
+	conv2_out.data = (float *)alignedMalloc(conv2_out.num*(conv2_out.channels+2)*conv2_out.height*conv2_out.width*sizeof(float));
+
+	conv2_bias = (float *)alignedMalloc(50 * sizeof(float));
+
+	load_model_param(fp_model, offset, 5 * 5 * 20 * 50, conv2_filter.data);
+	offset += 5 * 5 * 20 * 50;
+	load_model_param(fp_model, offset, 50, conv2_bias);
+	offset += 50;
+	pfunc_conv(pool1_out, conv2_filter, conv2_out, conv2_param);
+	conv_bias(conv2_out.data, conv2_out.channels, conv2_out.height*conv2_out.width, conv2_bias);
+
+	// max-pooling layer 2
+	// kernel: 2, stride: 2
+	pool2_param.pad_w = 0;
+	pool2_param.pad_h = 0;
+	pool2_param.stride_w = 2;
+	pool2_param.stride_h = 2;
+	pool2_out.num = 1;
+	pool2_out.channels = 50;
+	pool2_out.height = (conv2_out.height + 2 * pool2_param.pad_h - pool2_param.stride_h) / pool2_param.stride_h + 1;
+	pool2_out.width = (conv2_out.width + 2 * pool2_param.pad_w - pool2_param.stride_w) / pool2_param.stride_w + 1;
+	pool2_out.data = (float *)alignedMalloc(pool2_out.num*pool2_out.channels*pool2_out.height*pool2_out.width*sizeof(float));
+	pfunc_pooling(conv2_out, pool2_param, pool2_param.stride_h, pool2_param.stride_w, pool2_out);
+
+	// Inner-product layer 1
+	// num: 500
+	inner1_out = (float *)alignedMalloc(500 * 1 * sizeof(float));
+	inner1_weight = (float *)alignedMalloc(500 * 50 * pool2_out.height*pool2_out.width*sizeof(float));
+	inner1_bias = (float *)alignedMalloc(500 * sizeof(float));
+	load_model_param(fp_model, offset, 500 * 50 * pool2_out.height*pool2_out.width, inner1_weight);
+	offset += 500 * 50 * pool2_out.height*pool2_out.width;
+	load_model_param(fp_model, offset, 500, inner1_bias);
+	offset += 500;
+	inner_product_layer(pool2_out.data, inner1_weight, inner1_bias, inner1_out, 500, 50 * pool2_out.height*pool2_out.width);
+
+	// ReLu layer 1
+	relu1_out = (float *)alignedMalloc(500 * sizeof(float));
+	relu_layer(inner1_out, relu1_out, 500);
+
+	// Inner-product layer 2
+	// num: 10
+	inner2_out = (float *)alignedMalloc(10 * 1 * sizeof(float));
+	inner2_weight = (float *)alignedMalloc(10 * 500 * sizeof(float));
+	inner2_bias = (float *)alignedMalloc(10 * 1 * sizeof(float));
+	load_model_param(fp_model, offset, 10 * 500, inner2_weight);
+	offset += 10 * 500;
+	load_model_param(fp_model, offset, 10, inner2_bias);
+	offset += 10;
+	inner_product_layer(relu1_out, inner2_weight, inner2_bias, inner2_out, 10, 500);
+
+	// Softmax layer 1
+	soft1_out = (float *)alignedMalloc(10 * 1 * sizeof(float));
+	softmax_layer(inner2_out, soft1_out, 10);
+
+	printf("\n");
+	printf("soft1_out output value\n");
+	for (offset = 0; offset < 10; offset++)
+		printf("%.8f  ", soft1_out[offset]);
+
+	printf("\n");
+
+	fclose(fp_data);
+	fclose(fp_model);
+
+	free(conv1_data.data);
+	free(conv1_filter.data);
+	free(conv1_out.data);
+	free(conv1_bias);
+
+	free(pool1_out.data);
+
+	free(conv2_filter.data);
+	free(conv2_out.data);
+	free(conv2_bias);
+
+	free(pool2_out.data);
+
+	free(inner1_weight);
+	free(inner1_bias);
+	free(inner1_out);
+
+	free(relu1_out);
+
+	free(inner2_weight);
+	free(inner2_bias);
+	free(inner2_out);
+
+	free(soft1_out);
+}
+
+#if defined(IM2COL) && defined(GEMM)
+void ocl_conv_layer(const blob_shape_t src, const blob_shape_t filter, blob_shape_t dst, const conv_param_t param) {
+    int num_channel = src.channels;
+    int size_kernel = filter.height;
+    int width_img   = src.width;
+    int height_img  = src.height;
+    int size_pad    = param.pad_h;
+    int width_col   = width_img + 2 * size_pad - size_kernel + 1;
+    int height_col  = height_img + 2 * size_pad - size_kernel + 1;
+    int offset_img  = width_img * height_img;
+    int offset_col  = width_col * height_col;
+    
+    cl_mem d_img    = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * num_channel * offset_img, NULL, &status);
+    checkError(status, "Failed to allocate input device buffer\n");
+    cl_mem d_col    = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * num_channel * offset_col * size_kernel * size_kernel, NULL, &status);
+    checkError(status, "Failed to allocate output device buffer\n");
+    status = clEnqueueWriteBuffer(queues[K_IM2COL], d_img, CL_TRUE, 0, sizeof(float) * num_channel * offset_img, src.data, 0, NULL, NULL);
+    checkError(status, "Failed to copy data to device");
+    status = clFinish(queues[K_IM2COL]);
+    status = clSetKernelArg(kernels[K_IM2COL], 0, sizeof(cl_mem), (void*)&d_img);
+    checkError(status, "Failed to set im2col arg 0");
+    status = clSetKernelArg(kernels[K_IM2COL], 1, sizeof(cl_mem), (void*)&d_col);
+    checkError(status, "Failed to set im2col arg 1");
+    status = clSetKernelArg(kernels[K_IM2COL], 2, sizeof(int), (void*)&offset_img);
+    checkError(status, "Failed to set im2col arg 2");
+    status = clSetKernelArg(kernels[K_IM2COL], 3, sizeof(int), (void*)&offset_col);
+    checkError(status, "Failed to set im2col arg 3");
+    status = clSetKernelArg(kernels[K_IM2COL], 4, sizeof(int), (void*)&height_img);
+    checkError(status, "Failed to set im2col arg 4");
+    status = clSetKernelArg(kernels[K_IM2COL], 5, sizeof(int), (void*)&width_img);
+    checkError(status, "Failed to set im2col arg 5");
+    status = clSetKernelArg(kernels[K_IM2COL], 6, sizeof(int), (void*)&height_col);
+    checkError(status, "Failed to set im2col arg 6");
+    status = clSetKernelArg(kernels[K_IM2COL], 7, sizeof(int), (void*)&width_col);
+    checkError(status, "Failed to set im2col arg 7");
+    status = clSetKernelArg(kernels[K_IM2COL], 8, sizeof(int), (void*)&size_kernel);
+    checkError(status, "Failed to set im2col arg 8");
+    status = clSetKernelArg(kernels[K_IM2COL], 9, sizeof(int), (void*)&size_pad);
+    checkError(status, "Failed to set im2col arg 9");
+    
+    size_t channel_ext = num_channel * size_kernel * size_kernel;
+    cl_event event_im2col;
+    status = clEnqueueNDRangeKernel(queues[K_IM2COL], kernels[K_IM2COL], 1, NULL, &channel_ext, NULL, 0, NULL, &event_im2col);
+    clWaitForEvents(1, &event_im2col);
+  
+    int M = filter.num, K = filter.channels * filter.width * filter.height, N = dst.width * dst.height;
+    size_t wg_size[2] = {2, 2};
+    size_t g_size[2] = {N, M};
+    cl_event event_gemm;
+    cl_mem d_a, d_c;
+    d_a = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * M * K, NULL, &status);
+    d_c = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(float) * M * N, NULL, &status);
+
+    status = clEnqueueWriteBuffer(queues[K_GEMM], d_a, CL_TRUE, 0, sizeof(float) * M * K, filter.data, 0, NULL, NULL);
+
+    status     = clSetKernelArg(kernels[K_GEMM], 0, sizeof(cl_mem), &d_c);
+    status    |= clSetKernelArg(kernels[K_GEMM], 1, sizeof(cl_mem), &d_a);
+    status    |= clSetKernelArg(kernels[K_GEMM], 2, sizeof(cl_mem), &d_col);
+    status    |= clSetKernelArg(kernels[K_GEMM], 3, sizeof(unsigned int), &M);
+    status    |= clSetKernelArg(kernels[K_GEMM], 4, sizeof(unsigned int), &K);
+    status    |= clSetKernelArg(kernels[K_GEMM], 5, sizeof(unsigned int), &N);
+    clFinish(queues[K_GEMM]);
+
+    status = clEnqueueNDRangeKernel(queues[K_GEMM], kernels[K_GEMM], 2, NULL, g_size, wg_size, 0, NULL, &event_gemm);
+    clWaitForEvents(1, &event_gemm);
+    status = clEnqueueReadBuffer(queues[K_GEMM], d_c, CL_TRUE, 0, sizeof(float) * M * N, dst.data, 0, NULL, NULL);
+    clFinish(queues[K_GEMM]);
+
+    if(event_gemm)      clReleaseEvent(event_gemm);
+    if(event_im2col)    clReleaseEvent(event_im2col);
+    if(d_img)           clReleaseMemObject(d_img);
+    if(d_col)           clReleaseMemObject(d_col);
+    if(d_a)             clReleaseMemObject(d_a);
+    if(d_c)             clReleaseMemObject(d_c);
+}
+#endif
+
+#ifdef MAX_POOLING
+void ocl_pooling_max_layer(const blob_shape_t src, const conv_param_t param, const int kernel_h, const int kernel_w, blob_shape_t dst) {
+    int size_pool       = dst.num * dst.channels * dst.height * dst.width;
+    int size_input      = src.num * src.channels * src.height * src.width;
+    cl_mem d_input      = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * size_input, NULL, &status);
+    checkError(status, "Failed to allocate input device buffer\n");
+    cl_mem d_pool       = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * size_pool, NULL, &status);
+    checkError(status, "Failed to allocate size pool\n");
+    status = clEnqueueWriteBuffer(queues[K_MAX_POOLING], d_input, CL_TRUE, 0, sizeof(float) * size_input, src.data, 0, NULL, NULL);
+    checkError(status, "Failed to copy data to device");
+    status = clFinish(queues[K_MAX_POOLING]);
+    status = clSetKernelArg(kernels[K_MAX_POOLING], 0, sizeof(cl_mem), (void*)&d_input);
+    status = clSetKernelArg(kernels[K_MAX_POOLING], 1, sizeof(cl_mem), (void*)&d_pool);
+    status = clSetKernelArg(kernels[K_MAX_POOLING], 2, sizeof(int), (void*)&src.height);
+    status = clSetKernelArg(kernels[K_MAX_POOLING], 3, sizeof(int), (void*)&src.width);
+    status = clSetKernelArg(kernels[K_MAX_POOLING], 4, sizeof(int), (void*)&dst.height);
+    status = clSetKernelArg(kernels[K_MAX_POOLING], 5, sizeof(int), (void*)&dst.width);
+    int offset_input = src.height * src.width;
+    status = clSetKernelArg(kernels[K_MAX_POOLING], 6, sizeof(int), (void*)&offset_input);
+    status = clSetKernelArg(kernels[K_MAX_POOLING], 7, sizeof(int), (void*)&param.stride_w);
+    status = clSetKernelArg(kernels[K_MAX_POOLING], 8, sizeof(int), (void*)&kernel_w);
+    status = clSetKernelArg(kernels[K_MAX_POOLING], 9, sizeof(int), (void*)&param.pad_w);
+    
+    cl_event event_max_pooling;
+    size_t channel_ext = dst.channels * dst.height * dst.width;
+
+    status = clEnqueueNDRangeKernel(queues[K_MAX_POOLING], kernels[K_MAX_POOLING], 1, NULL, &channel_ext, NULL, 0, NULL, &event_max_pooling);
+    clWaitForEvents(1, &event_max_pooling);
+
+    status = clEnqueueReadBuffer(queues[K_MAX_POOLING], d_pool, CL_TRUE, 0, sizeof(float) * size_pool, dst.data, 0, NULL, NULL);
+    status = clFinish(queues[K_MAX_POOLING]);
+    if(d_input)             clReleaseMemObject(d_input);
+    if(d_pool)              clReleaseMemObject(d_pool);
+    if(event_max_pooling)   clReleaseEvent(event_max_pooling);
+}
+#endif
+
+#ifdef IM2COL
 bool im2col_test(void) {
     int num_channel = 128;
     int size_kernel = 3;
@@ -164,7 +504,7 @@ bool im2col_test(void) {
     double time_event = 0;
     double time_iter;
     cl_event event_im2col;
-#if 1
+#if 0
     time_cost = 0.0;
     int i = 0;
     int temp        = i / size_kernel;
@@ -190,13 +530,11 @@ bool im2col_test(void) {
         status = clEnqueueTask(queues[K_IM2COL], kernels[K_IM2COL], 0, NULL, &event_im2col);
         clWaitForEvents(1, &event_im2col);
         time_cost += (getCurrentTimestamp() - time_iter);
-        printf("time cost iter is %5.3lf\t\t", (getCurrentTimestamp() - time_iter) * 1e-6);
 
         cl_ulong s_time, e_time;
         status = clGetEventProfilingInfo(event_im2col, CL_PROFILING_COMMAND_QUEUED, sizeof(s_time), &s_time, NULL); 
         status = clGetEventProfilingInfo(event_im2col, CL_PROFILING_COMMAND_END, sizeof(e_time), &e_time, NULL); 
         time_event += (double)(e_time - s_time) * 1e-6;
-        printf("time event is %5.3lf, total:all: %5.3lf\n", (e_time - s_time) * 1e-6, time_event);
         
         temp        = i / size_kernel;
         w_offset    = i - temp * size_kernel;
@@ -252,8 +590,10 @@ bool im2col_test(void) {
     if(d_img)   clReleaseMemObject(d_img);
     if(d_col)   clReleaseMemObject(d_col);
 
+    if(event_im2col)    clReleaseEvent(event_im2col);
     return true;
 }
+#endif
 
 // Set up the context, device, kernels, and buffers...
 bool init() {

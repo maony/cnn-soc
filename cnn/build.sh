@@ -12,7 +12,7 @@ then
     echo "-------------------------------------------------------------------"
     # build opencl kernel emulator
     echo "----------build opencl kernel emulator----------"
-    aoc -march=emulator -v --board de1soc_sharedonly device/im2col.cl -o bin/im2col_sim.aocx --report
+    aoc -march=emulator -v --board de1soc_sharedonly device/cnn_define.cl -o bin/im2col_sim.aocx --report
     echo "-------------------------------------------------------------------"
     echo "----------build host---------"
     echo "-------------------------------------------------------------------"
@@ -32,7 +32,8 @@ then
     echo "-------------------------------------------------------------------"
     echo "----------build opencl kernel----------"
     # aoc -v --fp-relaxed --fpc --board de1soc_sharedonly device/im2col.cl -o bin/im2col_1x1.aocx --report --profile
-    aoc -v --fp-relaxed --fpc --board de1soc_sharedonly device/im2col.cl -o bin/im2col_task.aocx --report --profile
+    # aoc -v --fp-relaxed --fpc --board de1soc_sharedonly device/im2col.cl -o bin/im2col_task.aocx --report --profile
+    aoc -v --fp-relaxed --fpc --board de1soc_sharedonly device/cnn_define.cl -o bin/max_pooling.aocx --report --profile
     # aoc -v --sw-dimm-partition --fp-relaxed --util 95 -O3 --board de1soc_sharedonly matrix_mult.cl -o bin/matrix_mult_8x8_default.aocx --report
     echo "-------------------------------------------------------------------"
     echo "----------build host---------"
@@ -58,7 +59,7 @@ then
     # cp bin/matrix_mult_simd.aocx ./matrix_mult.aocx
     # cp bin/matrix_mult_16x8.aocx ./matrix_mult.aocx
     # cp bin/im2col_1x1.aocx ./cnn.aocx
-    cp bin/im2col_task.aocx ./cnn.aocx
+    cp bin/max_pooling.aocx ./cnn.aocx
     echo "-------------------------------------------------------------------"
     echo "----------scp transfer---------------"
     echo "-------------------------------------------------------------------"
