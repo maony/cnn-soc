@@ -4,12 +4,12 @@
 
 
 */
-#define CONV
+//#define CONV
 //#define MAX_POOLING
 //#define INNER_PRODUCT
 //#define RELU
 //#define SOFTMAX
-//#define BIAS
+#define BIAS
 
 #ifdef CONV
 #define EXT_IM2COL
@@ -29,16 +29,20 @@
 
 #ifdef INNER_PRODUCT
 #define BS_INNER_PRODUCT 1
+#include "inner_product.cl"
 #endif
 
 #ifdef RELU
 #define BS_RELU 1
+#include "relu.cl"
 #endif
 
 #ifdef SOFTMAX
 #define BS_SOFTMAX 1
+#include "softmax.cl"
 #endif
 
 #ifdef BIAS
 #define BS_BIAS 1
+#include "bias.cl"
 #endif

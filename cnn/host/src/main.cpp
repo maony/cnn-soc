@@ -45,10 +45,12 @@
 #include "ref_cnn.hpp"
 using namespace aocl_utils;
 
-#define IM2COL
-#define GEMM
-//define MAX_POOLING
-//define RELU
+//#define IM2COL
+//#define GEMM
+//#define MAX_POOLING
+//#define RELU
+//#define INNER_PRODUCT
+//#define BIAS
 
 // The set of simultaneous kernels
 enum KERNELS {
@@ -60,6 +62,15 @@ enum KERNELS {
 #endif
 #ifdef MAX_POOLING
     K_MAX_POOLING,
+#endif
+#ifdef INNER_PRODUCT
+    K_INNER_PRODUCT,
+#endif
+#ifdef RELU
+    K_RELU,
+#endif
+#ifdef BIAS
+    K_BIAS,
 #endif
     K_NUM_KERNELS
 };
@@ -73,6 +84,15 @@ static const char* kernel_names[K_NUM_KERNELS+1] =
 #endif
 #ifdef MAX_POOLING
     "max_pooling",
+#endif
+#ifdef INNER_PRODUCT
+    "inner_product",
+#endif
+#ifdef RELU
+    "relu",
+#endif
+#ifdef BIAS
+    "bias",
 #endif
     "null"
 };
@@ -103,6 +123,26 @@ void ocl_conv_layer(const blob_shape_t src, const blob_shape_t filter, blob_shap
 #endif
 void (*pfunc_conv)(const blob_shape_t src, const blob_shape_t filter, blob_shape_t dst, const conv_param_t param);
 
+#ifdef INNER_PRODUCT
+void ocl_inner_product_layer(float * NO_ALIAS in_data, float * NO_ALIAS in_weight, float * NO_ALIAS in_bias, float * NO_ALIAS out_data, uint row, uint col);
+#endif
+void (*pfunc_inner_product)(float * NO_ALIAS in_data, float * NO_ALIAS in_weight, float * NO_ALIAS in_bias, float * NO_ALIAS out_data, uint row, uint col);
+
+#ifdef RELU
+void ocl_relu_layer(float * NO_ALIAS in_data, float * NO_ALIAS out_data, uint num);
+#endif
+void (*pfunc_relu)(float * NO_ALIAS in_data, float * NO_ALIAS out_data, uint num);
+
+#ifdef BIAS
+void ocl_conv_bias(float * NO_ALIAS data, uint row, uint col, float * NO_ALIAS bias);
+#endif
+void (*pfunc_bias)(float * NO_ALIAS data, uint row, uint col, float * NO_ALIAS bias);
+
+#ifdef SOFTMAX
+void ocl_softmax_layer(float * NO_ALIAS in_data, float * NO_ALIAS out_data, uint num);
+#endif
+void (*pfunc_softmax)(float * NO_ALIAS in_data, float * NO_ALIAS out_data, uint num);
+
 // Entry point.
 int main(int argc, char **argv) {
     Options options(argc, argv);
@@ -117,22 +157,35 @@ int main(int argc, char **argv) {
     printf("-----------Init complete!-------------\n");
     printf("--------------------------------------\n");
    
-    pfunc_pooling   = pooling_max_layer;
-    pfunc_conv      = conv_layer;
-    if(1) {
+    pfunc_pooling       = pooling_max_layer;
+    pfunc_conv          = conv_layer;
+    pfunc_inner_product = inner_product_layer;
+    pfunc_relu          = relu_layer;
+    pfunc_bias          = conv_bias;
+    pfunc_softmax       = softmax_layer;
+
 #if defined(IM2COL) && defined(GEMM)
-        printf("----ocl conv----\n");
-        pfunc_conv      = ocl_conv_layer;
+    pfunc_conv          = ocl_conv_layer;
 #endif
 #ifdef MAX_POOLING
-        printf("----ocl max pooling----\n");
-        pfunc_pooling   = ocl_pooling_max_layer;
+    pfunc_pooling       = ocl_pooling_max_layer;
 #endif
-    }
+#ifdef INNER_PRODUCT
+    pfunc_inner_product = ocl_inner_product_layer;
+#endif
+#ifdef RELU
+    pfunc_relu          = ocl_relu_layer;
+#endif
+#ifdef BIAS
+    pfunc_bias          = ocl_conv_bias;
+#endif
+#ifdef SOFTMAX
+    pfunc_softmax       = ocl_softmax_layer;
+#endif
 
     //im2col_test();
     //ref_lenet();
-    lenet_test(1);
+    lenet_test(7);
 
     printf("--------------------------------------\n");
     printf("-----------test complete!-------------\n");
@@ -264,11 +317,11 @@ void lenet_test(int file_sel) {
 	offset += 500 * 50 * pool2_out.height*pool2_out.width;
 	load_model_param(fp_model, offset, 500, inner1_bias);
 	offset += 500;
-	inner_product_layer(pool2_out.data, inner1_weight, inner1_bias, inner1_out, 500, 50 * pool2_out.height*pool2_out.width);
+	pfunc_inner_product(pool2_out.data, inner1_weight, inner1_bias, inner1_out, 500, 50 * pool2_out.height*pool2_out.width);
 
 	// ReLu layer 1
 	relu1_out = (float *)alignedMalloc(500 * sizeof(float));
-	relu_layer(inner1_out, relu1_out, 500);
+	pfunc_relu(inner1_out, relu1_out, 500);
 
 	// Inner-product layer 2
 	// num: 10
@@ -279,7 +332,7 @@ void lenet_test(int file_sel) {
 	offset += 10 * 500;
 	load_model_param(fp_model, offset, 10, inner2_bias);
 	offset += 10;
-	inner_product_layer(relu1_out, inner2_weight, inner2_bias, inner2_out, 10, 500);
+	pfunc_inner_product(relu1_out, inner2_weight, inner2_bias, inner2_out, 10, 500);
 
 	// Softmax layer 1
 	soft1_out = (float *)alignedMalloc(10 * 1 * sizeof(float));
@@ -321,8 +374,87 @@ void lenet_test(int file_sel) {
 	free(soft1_out);
 }
 
+#ifdef RELU
+void ocl_relu_layer(float * NO_ALIAS in_data, float * NO_ALIAS out_data, uint num) {
+    printf("entering func:\t%s\n", __FUNCTION__);
+    cl_mem d_data   = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * num, NULL, &status);
+    checkError(status, "Failed to allocate input device buffer\n");
+    cl_mem d_relu   = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * num, NULL, &status);
+    checkError(status, "Failed to allocate input device buffer\n");
+
+    status = clEnqueueWriteBuffer(queues[K_RELU], d_data, CL_TRUE, 0, sizeof(float) * num, in_data, 0, NULL, NULL);
+    checkError(status, "Failed to copy data to device");
+    
+    status = clSetKernelArg(kernels[K_RELU], 0, sizeof(cl_mem), (void*)&d_data);
+    checkError(status, "Failed to set im2col arg 0");
+    status = clSetKernelArg(kernels[K_RELU], 1, sizeof(cl_mem), (void*)&d_relu);
+    checkError(status, "Failed to set im2col arg 1");
+    status = clFinish(queues[K_RELU]);
+    
+    size_t channel_ext = num;
+    cl_event event_relu;
+    status = clEnqueueNDRangeKernel(queues[K_RELU], kernels[K_RELU], 1, NULL, &channel_ext, NULL, 0, NULL, &event_relu);
+    clWaitForEvents(1, &event_relu);
+
+    status = clEnqueueReadBuffer(queues[K_RELU], d_relu, CL_TRUE, 0, sizeof(float) * num, out_data, 0, NULL, NULL);
+    clFinish(queues[K_RELU]);
+
+    if(event_relu)  clReleaseEvent(event_relu);
+    if(d_data)      clReleaseMemObject(d_data);
+    if(d_relu)      clReleaseMemObject(d_relu);
+}
+#endif
+
+#ifdef INNER_PRODUCT
+void ocl_inner_product_layer(float * NO_ALIAS in_data, float * NO_ALIAS in_weight, float * NO_ALIAS in_bias, float * NO_ALIAS out_data, uint row, uint col) {
+    printf("entering func:\t%s\n", __FUNCTION__);
+    cl_mem d_data   = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * col, NULL, &status);
+    checkError(status, "Failed to allocate input device buffer\n");
+    cl_mem d_weight = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * col * row, NULL, &status);
+    checkError(status, "Failed to allocate input device buffer\n");
+    cl_mem d_bias   = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * row, NULL, &status);
+    checkError(status, "Failed to allocate input device buffer\n");
+    cl_mem d_out    = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * row, NULL, &status);
+    checkError(status, "Failed to allocate input device buffer\n");
+
+    status = clEnqueueWriteBuffer(queues[K_INNER_PRODUCT], d_data, CL_TRUE, 0, sizeof(float) * col, in_data, 0, NULL, NULL);
+    checkError(status, "Failed to copy data to device");
+    status = clEnqueueWriteBuffer(queues[K_INNER_PRODUCT], d_weight, CL_TRUE, 0, sizeof(float) * col * row, in_weight, 0, NULL, NULL);
+    checkError(status, "Failed to copy data to device");
+    status = clEnqueueWriteBuffer(queues[K_INNER_PRODUCT], d_bias, CL_TRUE, 0, sizeof(float) * row, in_bias, 0, NULL, NULL);
+    checkError(status, "Failed to copy data to device");
+    status = clFinish(queues[K_INNER_PRODUCT]);
+    
+    status = clSetKernelArg(kernels[K_INNER_PRODUCT], 0, sizeof(cl_mem), (void*)&d_data);
+    checkError(status, "Failed to set im2col arg 0");
+    status = clSetKernelArg(kernels[K_INNER_PRODUCT], 1, sizeof(cl_mem), (void*)&d_weight);
+    checkError(status, "Failed to set im2col arg 1");
+    status = clSetKernelArg(kernels[K_INNER_PRODUCT], 2, sizeof(cl_mem), (void*)&d_bias);
+    checkError(status, "Failed to set im2col arg 2");
+    status = clSetKernelArg(kernels[K_INNER_PRODUCT], 3, sizeof(cl_mem), (void*)&d_out);
+    checkError(status, "Failed to set im2col arg 3");
+    status = clSetKernelArg(kernels[K_INNER_PRODUCT], 4, sizeof(int), (void*)&col);
+    checkError(status, "Failed to set im2col arg 4");
+    
+    size_t channel_ext = row;
+    cl_event event_inner_product;
+    status = clEnqueueNDRangeKernel(queues[K_INNER_PRODUCT], kernels[K_INNER_PRODUCT], 1, NULL, &channel_ext, NULL, 0, NULL, &event_inner_product);
+    clWaitForEvents(1, &event_inner_product);
+
+    status = clEnqueueReadBuffer(queues[K_INNER_PRODUCT], d_out, CL_TRUE, 0, sizeof(float) * row, out_data, 0, NULL, NULL);
+    clFinish(queues[K_INNER_PRODUCT]);
+
+    if(event_inner_product) clReleaseEvent(event_inner_product);
+    if(d_data)              clReleaseMemObject(d_data);
+    if(d_weight)            clReleaseMemObject(d_weight);
+    if(d_bias)              clReleaseMemObject(d_bias);
+    if(d_out)               clReleaseMemObject(d_weight);
+}
+#endif
+
 #if defined(IM2COL) && defined(GEMM)
 void ocl_conv_layer(const blob_shape_t src, const blob_shape_t filter, blob_shape_t dst, const conv_param_t param) {
+    printf("entering func:\t%s\n", __FUNCTION__);
     int num_channel = src.channels;
     int size_kernel = filter.height;
     int width_img   = src.width;
@@ -400,6 +532,7 @@ void ocl_conv_layer(const blob_shape_t src, const blob_shape_t filter, blob_shap
 
 #ifdef MAX_POOLING
 void ocl_pooling_max_layer(const blob_shape_t src, const conv_param_t param, const int kernel_h, const int kernel_w, blob_shape_t dst) {
+    printf("entering func:\t%s\n", __FUNCTION__);
     int size_pool       = dst.num * dst.channels * dst.height * dst.width;
     int size_input      = src.num * src.channels * src.height * src.width;
     cl_mem d_input      = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * size_input, NULL, &status);
