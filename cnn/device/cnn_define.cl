@@ -4,12 +4,12 @@
 
 
 */
-//#define CONV
+#define CONV
 //#define MAX_POOLING
 //#define INNER_PRODUCT
 //#define RELU
 //#define SOFTMAX
-#define BIAS
+//#define BIAS
 
 #ifdef CONV
 #define EXT_IM2COL

@@ -6,7 +6,11 @@
 
 
 
-float   src_col[96 * 25 * 27 * 27];
+//float   src_col[96 * 25 * 27 * 27];
+
+size_t size_blob(blob_shape_t data) {
+    return data.num * data.channels * data.height * data.width;
+}
 
 void load_model_param(FILE *fp, uint offset, uint num, float *param)
 {
@@ -25,14 +29,15 @@ void im2col(const Dtype* data_im, Dtype* data_col, const int channels,
 	const int pad_h, const int pad_w,
 	const int stride_h, const int stride_w)
 {
-	/*int height_col = (height + 2 * pad_h - kernel_h) / stride_h + 1;
+	int height_col = (height + 2 * pad_h - kernel_h) / stride_h + 1;
 	int width_col = (width + 2 * pad_w - kernel_w) / stride_w + 1;
 	int channels_col = channels * kernel_h * kernel_w;
 	int c, w_offset, h_offset, c_im, h, w, h_pad, w_pad;
+    //printf("conv size is %d, w %d; h %d; c %d;\n", height_col * width_col * channels_col, width_col, height_col, channels_col);
 
 	for (c = 0; c < channels_col; ++c) {
-		w_offset = c - (c / kernel_w) * kernel_w;
-		h_offset = (c / kernel_w) - ((c / kernel_w) / kernel_h) * kernel_h;
+		w_offset = c % kernel_w;
+		h_offset = (c / kernel_w) % kernel_h;
 		c_im = ((c / kernel_w) / kernel_h);
 
 		for (h = 0; h < height_col; ++h) {
@@ -47,8 +52,8 @@ void im2col(const Dtype* data_im, Dtype* data_col, const int channels,
 					data_col[(c * height_col + h) * width_col + w] = 0;
 			}
 		}
-	}*/
-
+	}
+/*
 	int height_col = sDiv((height + 2 * pad_h - kernel_h), stride_h) + 1;
 	int width_col = sDiv((width + 2 * pad_w - kernel_w), stride_w) + 1;
 	int channels_col = channels * kernel_h * kernel_w;
@@ -95,7 +100,7 @@ void im2col(const Dtype* data_im, Dtype* data_col, const int channels,
 				data_col[(c * height_col + h) * width_col + w] = 0;
 		}
 	}
-
+*/
 }
 
 /* Native implementation for reference */
@@ -118,8 +123,7 @@ void MatMul(float * NO_ALIAS a, float * NO_ALIAS b, float * NO_ALIAS c, const in
 
 void conv_layer(const blob_shape_t src, const blob_shape_t filter, blob_shape_t dst, const conv_param_t param)
 {
-
-	float * NO_ALIAS img_col = src_col;
+	float * NO_ALIAS img_col = (float *)malloc(sizeof(float) * src.channels * filter.height * filter.width * dst.height * dst.width);
 	float * NO_ALIAS img_dst = dst.data;
 
 	ASSERT(src.channels == filter.channels);
@@ -130,6 +134,7 @@ void conv_layer(const blob_shape_t src, const blob_shape_t filter, blob_shape_t 
 		param.pad_h, param.pad_w, param.stride_h, param.stride_w);
 	// Matrix mul
 	MatMul(filter.data, img_col, img_dst, filter.num, filter.channels*filter.width*filter.height, dst.width*dst.height);
+    free(img_col);
 }
 
 void conv_bias(float * NO_ALIAS data, uint row, uint col, float * NO_ALIAS bias)

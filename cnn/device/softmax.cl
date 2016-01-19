@@ -25,10 +25,10 @@ void softmax (__global float *restrict data_input,
         value = data_input[i] - scale;
         value = (float)exp(value);
         sum  += value;
-        data_out[i] = value;
+        data_output[i] = value;
     }
 
     for(i = 0; i < num; i++) {
-        data_out[i] = data_out[i] / sum;    
+        data_output[i] = data_output[i] / sum;    
     }
 }

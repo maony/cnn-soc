@@ -14,7 +14,8 @@ void im2col (__global float *restrict data_img,
              const int height_img, const int width_img,
              const int height_col, const int width_col,
              const int size_kernel, const int size_pad,
-             const int w_offset, const int h_offset) {
+             const int w_offset, const int h_offset,
+             const int size_stride) {
     int w_pad, h_pad;
     int index_img, index_col;
     
@@ -23,8 +24,8 @@ void im2col (__global float *restrict data_img,
 
     for(int h = 0; h < height_col; h++) {
         for(int w = 0; w < width_col; w++) {
-            w_pad = w - size_pad + w_offset;
-            h_pad = h - size_pad + h_offset;
+            w_pad = w * size_stride - size_pad + w_offset;
+            h_pad = h * size_stride - size_pad + h_offset;
             index_img = h_pad * width_img + w_pad;
             index_col = h * width_col + w;
             if(w_pad >= 0 && w_pad < width_img && h_pad >= 0 && h_pad < height_img)
@@ -42,7 +43,8 @@ void im2col (__global float *restrict data_img,
              const int offset_img, const int offset_col,
              const int height_img, const int width_img,
              const int height_col, const int width_col,
-             const int size_kernel, const int size_pad) {
+             const int size_kernel, const int size_pad, 
+             const int size_stride) {
     int index       = get_global_id(0);
     int temp        = index / size_kernel;
     int w_offset    = index - temp * size_kernel;
@@ -56,8 +58,8 @@ void im2col (__global float *restrict data_img,
 
     for(int h = 0; h < height_col; h++) {
         for(int w = 0; w < width_col; w++) {
-            w_pad = w - size_pad + w_offset;
-            h_pad = h - size_pad + h_offset;
+            w_pad = w * size_stride - size_pad + w_offset;
+            h_pad = h * size_stride - size_pad + h_offset;
             if(w_pad >= 0 && w_pad < width_img && h_pad >= 0 && h_pad < height_img)
                 ptr_col[h*width_col+w] = ptr_img[h_pad*width_img+w_pad];
             else

@@ -20,21 +20,36 @@ typedef char	uchar;
 //typedef int		uint;
 typedef float	Dtype;
 
-typedef struct
+typedef struct blob_shape
 {
 	int num;
 	int channels;
 	int height;
 	int width;
 	float *data;
+   
+    blob_shape() {};
+    blob_shape(int n, int c, int h, int w) {
+        num = n;
+        channels = c;
+        height = h;
+        width = w;
+    };
 }blob_shape_t;
 
-typedef struct
+typedef struct conv_param
 {
 	int pad_w;
 	int pad_h;
 	int stride_w;
 	int stride_h;
+    conv_param() {};
+    conv_param(int ph, int pw, int sh, int sw) {
+        pad_w = pw;
+        pad_h = ph;
+        stride_w = sw;
+        stride_h = sh;
+    };
 }conv_param_t;
 
 void im2col_ref(const float* data_im, float* data_col, const int channels,
@@ -50,5 +65,6 @@ void inner_product_layer(float * NO_ALIAS in_data, float * NO_ALIAS in_weight, f
 void relu_layer(float * NO_ALIAS in_data, float * NO_ALIAS out_data, uint num);
 void softmax_layer(float * NO_ALIAS in_data, float * NO_ALIAS out_data, uint num);
 void ref_lenet(void);
+size_t size_blob(blob_shape_t data);
 
 #endif

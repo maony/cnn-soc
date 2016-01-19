@@ -45,12 +45,13 @@
 #include "ref_cnn.hpp"
 using namespace aocl_utils;
 
-//#define IM2COL
-//#define GEMM
+#define IM2COL
+#define GEMM
 //#define MAX_POOLING
 //#define RELU
 //#define INNER_PRODUCT
 //#define BIAS
+//#define SOFTMAX
 
 // The set of simultaneous kernels
 enum KERNELS {
@@ -71,6 +72,9 @@ enum KERNELS {
 #endif
 #ifdef BIAS
     K_BIAS,
+#endif
+#ifdef SOFTMAX
+    K_SOFTMAX,
 #endif
     K_NUM_KERNELS
 };
@@ -94,6 +98,9 @@ static const char* kernel_names[K_NUM_KERNELS+1] =
 #ifdef BIAS
     "bias",
 #endif
+#ifdef SOFTMAX
+    "softmax",
+#endif
     "null"
 };
 
@@ -112,6 +119,7 @@ void cleanup();
 bool approximatelyEqual(float a, float b, float epsilon);
 bool im2col_test();
 void lenet_test(int sel);
+void attribute_test(void);
 
 #ifdef MAX_POOLING
 void ocl_pooling_max_layer(const blob_shape_t src, const conv_param_t param, const int kernel_h, const int kernel_w, blob_shape_t dst);
@@ -185,7 +193,8 @@ int main(int argc, char **argv) {
 
     //im2col_test();
     //ref_lenet();
-    lenet_test(7);
+    //lenet_test(9);
+    attribute_test();
 
     printf("--------------------------------------\n");
     printf("-----------test complete!-------------\n");
@@ -194,6 +203,59 @@ int main(int argc, char **argv) {
     cleanup();
     return 0;
 }
+
+void attribute_test(void) {
+    int offset = 0, ret = 0;
+    FILE        *fp_data, *fp_model;
+    fp_data     = fopen("conv01-in.bin", "rb");
+    fp_model    = fopen("attribute-model.bin", "rb");
+
+#define WRITE_FILE(dat, name, h, w) \
+    do {                            \
+        FILE *fp_file;              \
+        fp_file = fopen(name, "w"); \
+        for(int i = 0; i < h; i++) {    \
+            for(int j = 0; j < w; j++)  \
+                fprintf(fp_file, "%e\t", dat[i*w+j]); \
+            fprintf(fp_file, "\n"); \
+        }   \
+        fclose(fp_file);    \
+    } while(0)
+
+    // Convolution layer 1
+    blob_shape_t conv01_data(1, 3, 256, 256);
+	conv01_data.data = (float *)alignedMalloc(size_blob(conv01_data)*sizeof(float));
+	ret = fread(conv01_data.data, sizeof(float), size_blob(conv01_data), fp_data);
+
+    blob_shape_t conv01_filter(16, conv01_data.channels, 7, 7);
+	conv01_filter.data = (float *)alignedMalloc(size_blob(conv01_filter)*sizeof(float));
+	
+    conv_param_t conv01_param(conv01_filter.height/2, conv01_filter.width/2, 2, 2);
+	
+    blob_shape_t conv01_out(1, conv01_filter.num, 
+            (conv01_data.height + 2 * conv01_param.pad_h - conv01_filter.height) / conv01_param.stride_h + 1,
+            (conv01_data.width + 2 * conv01_param.pad_w - conv01_filter.width) / conv01_param.stride_w + 1
+            );
+	conv01_out.data = (float *)alignedMalloc(size_blob(conv01_out)*sizeof(float));
+
+	float *conv01_bias = (float *)alignedMalloc(conv01_out.channels * sizeof(float));
+
+	load_model_param(fp_model, offset, size_blob(conv01_filter), conv01_filter.data);
+	offset += size_blob(conv01_filter);
+	load_model_param(fp_model, offset, conv01_out.channels, conv01_bias);
+	offset += conv01_out.channels;
+	
+    pfunc_conv(conv01_data, conv01_filter, conv01_out, conv01_param);
+	pfunc_bias(conv01_out.data, conv01_out.channels, conv01_out.height*conv01_out.width, conv01_bias);
+    // ---------
+    WRITE_FILE(conv01_out.data, "conv01-out.dat", conv01_out.height * conv01_out.width, 1); 
+
+    alignedFree(conv01_data.data);
+    alignedFree(conv01_filter.data);
+    alignedFree(conv01_bias);
+    alignedFree(conv01_out.data);
+}
+
 void lenet_test(int file_sel) {
 
 	blob_shape_t conv1_data, conv1_filter, conv1_out;
@@ -253,7 +315,7 @@ void lenet_test(int file_sel) {
 	offset += 20;
 	// 20X(5*5), 25X(24*24)
 	pfunc_conv(conv1_data, conv1_filter, conv1_out, conv1_param);
-	conv_bias(conv1_out.data, conv1_out.channels, conv1_out.height*conv1_out.width, conv1_bias);
+	pfunc_bias(conv1_out.data, conv1_out.channels, conv1_out.height*conv1_out.width, conv1_bias);
 
 	// max-pooling layer 1
 	// kernel: 2, stride: 2
@@ -293,7 +355,7 @@ void lenet_test(int file_sel) {
 	load_model_param(fp_model, offset, 50, conv2_bias);
 	offset += 50;
 	pfunc_conv(pool1_out, conv2_filter, conv2_out, conv2_param);
-	conv_bias(conv2_out.data, conv2_out.channels, conv2_out.height*conv2_out.width, conv2_bias);
+	pfunc_bias(conv2_out.data, conv2_out.channels, conv2_out.height*conv2_out.width, conv2_bias);
 
 	// max-pooling layer 2
 	// kernel: 2, stride: 2
@@ -336,7 +398,7 @@ void lenet_test(int file_sel) {
 
 	// Softmax layer 1
 	soft1_out = (float *)alignedMalloc(10 * 1 * sizeof(float));
-	softmax_layer(inner2_out, soft1_out, 10);
+	pfunc_softmax(inner2_out, soft1_out, 10);
 
 	printf("\n");
 	printf("soft1_out output value\n");
@@ -373,6 +435,19 @@ void lenet_test(int file_sel) {
 
 	free(soft1_out);
 }
+#ifdef BIAS
+void ocl_conv_bias(float * NO_ALIAS data, uint row, uint col, float * NO_ALIAS bias) {
+    printf("entering func:\t%s\n", __FUNCTION__);
+
+}
+#endif
+
+#ifdef SOFTMAX
+void ocl_softmax_layer(float * NO_ALIAS in_data, float * NO_ALIAS out_data, uint num) {
+    printf("entering func:\t%s\n", __FUNCTION__);
+
+}
+#endif
 
 #ifdef RELU
 void ocl_relu_layer(float * NO_ALIAS in_data, float * NO_ALIAS out_data, uint num) {
@@ -460,8 +535,9 @@ void ocl_conv_layer(const blob_shape_t src, const blob_shape_t filter, blob_shap
     int width_img   = src.width;
     int height_img  = src.height;
     int size_pad    = param.pad_h;
-    int width_col   = width_img + 2 * size_pad - size_kernel + 1;
-    int height_col  = height_img + 2 * size_pad - size_kernel + 1;
+    int size_stride = param.stride_h;
+    int width_col   = (width_img + 2 * size_pad - size_kernel) / size_stride + 1;
+    int height_col  = (height_img + 2 * size_pad - size_kernel) / size_stride + 1;
     int offset_img  = width_img * height_img;
     int offset_col  = width_col * height_col;
     
@@ -492,6 +568,8 @@ void ocl_conv_layer(const blob_shape_t src, const blob_shape_t filter, blob_shap
     checkError(status, "Failed to set im2col arg 8");
     status = clSetKernelArg(kernels[K_IM2COL], 9, sizeof(int), (void*)&size_pad);
     checkError(status, "Failed to set im2col arg 9");
+    status = clSetKernelArg(kernels[K_IM2COL], 10, sizeof(int), (void*)&size_stride);
+    checkError(status, "Failed to set im2col arg 10");
     
     size_t channel_ext = num_channel * size_kernel * size_kernel;
     cl_event event_im2col;
