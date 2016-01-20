@@ -14,7 +14,7 @@ void bias (__global float *restrict data,
            const int column) {
     int index       = get_global_id(0);
     int i;
-    int value       = bias[index];
+    float value     = bias[index];
     int offset      = index * column;
 
     for(i = 0; i < column; i++)

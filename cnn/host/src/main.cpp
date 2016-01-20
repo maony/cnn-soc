@@ -43,75 +43,35 @@
 #include "CL/opencl.h"
 #include "AOCLUtils/aocl_utils.h"
 #include "ref_cnn.hpp"
-using namespace aocl_utils;
-
-#define IM2COL
-#define GEMM
-//#define MAX_POOLING
-//#define RELU
-//#define INNER_PRODUCT
-//#define BIAS
-//#define SOFTMAX
-
-// The set of simultaneous kernels
-enum KERNELS {
-#ifdef IM2COL
-    K_IM2COL,
-#endif
-#ifdef GEMM
-    K_GEMM,
-#endif
-#ifdef MAX_POOLING
-    K_MAX_POOLING,
-#endif
-#ifdef INNER_PRODUCT
-    K_INNER_PRODUCT,
-#endif
-#ifdef RELU
-    K_RELU,
-#endif
-#ifdef BIAS
-    K_BIAS,
-#endif
-#ifdef SOFTMAX
-    K_SOFTMAX,
-#endif
-    K_NUM_KERNELS
-};
-static const char* kernel_names[K_NUM_KERNELS+1] =
-{
-#ifdef IM2COL
-    "im2col",
-#endif
-#ifdef GEMM
-    "gemm",
-#endif
-#ifdef MAX_POOLING
-    "max_pooling",
-#endif
-#ifdef INNER_PRODUCT
-    "inner_product",
-#endif
-#ifdef RELU
-    "relu",
-#endif
-#ifdef BIAS
-    "bias",
-#endif
-#ifdef SOFTMAX
-    "softmax",
-#endif
-    "null"
-};
+#include "layer.hpp"
+#include "common.hpp"
 
 // ACL runtime configuration
-static cl_platform_id platform = NULL;
-static cl_device_id device = NULL;
-static cl_context context = NULL;
-static cl_command_queue queues[K_NUM_KERNELS];
-static cl_kernel kernels[K_NUM_KERNELS];
-static cl_program program = NULL;
-static cl_int status = 0;
+cl_platform_id platform = NULL;
+cl_device_id device = NULL;
+cl_context context = NULL;
+cl_command_queue queues[K_NUM_KERNELS];
+cl_kernel kernels[K_NUM_KERNELS];
+cl_program program = NULL;
+cl_int status = 0;
+
+#define WRITE_TXT(dat, name, c) \
+    do {                            \
+        FILE *fp_file;              \
+        fp_file = fopen(name, "w"); \
+        for(int i = 0; i < c; i++) {    \
+            fprintf(fp_file, "%6.2f\n", dat[i]); \
+        }   \
+        fclose(fp_file);    \
+    } while(0)
+
+#define WRITE_BIN(dat, name, c) \
+    do {                            \
+        FILE *fp_bin;              \
+        fp_bin = fopen(name, "wb"); \
+        fwrite(dat, sizeof(float), c, fp_bin); \
+        fclose(fp_bin);    \
+    } while(0)
 
 // Function prototypes
 bool init();
@@ -120,6 +80,7 @@ bool approximatelyEqual(float a, float b, float epsilon);
 bool im2col_test();
 void lenet_test(int sel);
 void attribute_test(void);
+void ocl_attribute(void);
 
 #ifdef MAX_POOLING
 void ocl_pooling_max_layer(const blob_shape_t src, const conv_param_t param, const int kernel_h, const int kernel_w, blob_shape_t dst);
@@ -193,8 +154,9 @@ int main(int argc, char **argv) {
 
     //im2col_test();
     //ref_lenet();
-    //lenet_test(9);
-    attribute_test();
+    //lenet_test(5);
+    //attribute_test();
+    ocl_attribute();
 
     printf("--------------------------------------\n");
     printf("-----------test complete!-------------\n");
@@ -204,23 +166,61 @@ int main(int argc, char **argv) {
     return 0;
 }
 
+void ocl_attribute(void) {
+    int offset = 0;
+    FILE        *fp_data, *fp_model;
+    fp_data     = fopen("conv01-in.bin", "rb");
+    fp_model    = fopen("attribute-model.bin", "rb");
+    
+#define MUL_4(a, b, c, d) a * b * c * d
+    int dn = 1, dc = 3, dh = 256, dw = 256;
+    int fn = 16, fc = 3, fh = 7, fw = 7;
+    int ph = fh / 2, pw = fw / 2;
+    int sh = 2, sw = 2;
+
+    float *conv01_data = (float *)alignedMalloc(sizeof(float) * MUL_4(dn, dc, dh, dw));
+	fread(conv01_data, sizeof(float), MUL_4(dn, dc, dh, dw), fp_data);
+    cl_mem d_conv01_data = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * MUL_4(dn, dc, dh, dw), NULL, &status);
+    checkError(status, "Failed to allocate input device buffer\n");
+    status = clEnqueueWriteBuffer(queues[K_IM2COL], d_conv01_data, CL_TRUE, 0, sizeof(float) * MUL_4(dn, dc, dh, dw), conv01_data, 0, NULL, NULL);
+    checkError(status, "Failed to copy data to device");
+
+    float *conv01_filter = (float *)alignedMalloc(sizeof(float) * MUL_4(fn, fc, fh, fw));
+    float *conv01_bias   = (float *)alignedMalloc(sizeof(float) * 16);
+    load_model_param(fp_model, offset, MUL_4(fn, fc, fh, fw), conv01_filter);
+	offset += MUL_4(fn, fc, fh, fw);
+	load_model_param(fp_model, offset, 16, conv01_bias);
+	offset += 16;
+   
+    //ConvLayer conv01;
+    //conv01.init_param(dn, dc, dh, dw, ph, pw, sh, sw);
+    ConvLayer conv01(dn, dc, dh, dw, ph, pw, sh, sw);
+    conv01.init_weight(fn, fh, fw, conv01_filter, conv01_bias);
+    clFinish(queues[K_IM2COL]);
+    conv01.forward(d_conv01_data);
+    
+    cl_mem d_conv01_out;
+    conv01.get_mem(d_conv01_out, dn, dc, dh, dw);
+    float *h_conv01_out = (float *)alignedMalloc(sizeof(float) * MUL_4(dn, dc, dh, dw));
+    status = clEnqueueReadBuffer(queues[K_IM2COL], d_conv01_out, CL_TRUE, 0, sizeof(float) * MUL_4(dn, dc, dh, dw), h_conv01_out, 0, NULL, NULL);
+    clFinish(queues[K_IM2COL]);
+    
+    WRITE_BIN(h_conv01_out, "conv01-out-sim.bin", MUL_4(dn, dc, dh, dw)); 
+    
+    alignedFree(conv01_data);
+    alignedFree(h_conv01_out);
+    alignedFree(conv01_filter);
+    alignedFree(conv01_bias);
+    if(d_conv01_data)   clReleaseMemObject(d_conv01_data);
+    if(d_conv01_out)    clReleaseMemObject(d_conv01_out);
+}
+
 void attribute_test(void) {
     int offset = 0, ret = 0;
     FILE        *fp_data, *fp_model;
     fp_data     = fopen("conv01-in.bin", "rb");
     fp_model    = fopen("attribute-model.bin", "rb");
 
-#define WRITE_FILE(dat, name, h, w) \
-    do {                            \
-        FILE *fp_file;              \
-        fp_file = fopen(name, "w"); \
-        for(int i = 0; i < h; i++) {    \
-            for(int j = 0; j < w; j++)  \
-                fprintf(fp_file, "%e\t", dat[i*w+j]); \
-            fprintf(fp_file, "\n"); \
-        }   \
-        fclose(fp_file);    \
-    } while(0)
 
     // Convolution layer 1
     blob_shape_t conv01_data(1, 3, 256, 256);
@@ -248,7 +248,7 @@ void attribute_test(void) {
     pfunc_conv(conv01_data, conv01_filter, conv01_out, conv01_param);
 	pfunc_bias(conv01_out.data, conv01_out.channels, conv01_out.height*conv01_out.width, conv01_bias);
     // ---------
-    WRITE_FILE(conv01_out.data, "conv01-out.dat", conv01_out.height * conv01_out.width, 1); 
+    WRITE_BIN(conv01_out.data, "conv01-out-sim.bin", conv01_out.height * conv01_out.width * conv01_out.channels); 
 
     alignedFree(conv01_data.data);
     alignedFree(conv01_filter.data);
@@ -439,6 +439,35 @@ void lenet_test(int file_sel) {
 void ocl_conv_bias(float * NO_ALIAS data, uint row, uint col, float * NO_ALIAS bias) {
     printf("entering func:\t%s\n", __FUNCTION__);
 
+    cl_mem d_data   = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * col * row, NULL, &status);
+    checkError(status, "Failed to allocate input device buffer\n");
+    cl_mem d_bias   = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * row, NULL, &status);
+    checkError(status, "Failed to allocate input device buffer\n");
+    
+    status = clEnqueueWriteBuffer(queues[K_BIAS], d_data, CL_TRUE, 0, sizeof(float) * col * row, data, 0, NULL, NULL);
+    checkError(status, "Failed to copy data to device");
+    status = clEnqueueWriteBuffer(queues[K_BIAS], d_bias, CL_TRUE, 0, sizeof(float) * row, bias, 0, NULL, NULL);
+    checkError(status, "Failed to copy data to device");
+    
+    status = clSetKernelArg(kernels[K_BIAS], 0, sizeof(cl_mem), (void*)&d_data);
+    checkError(status, "Failed to set im2col arg 0");
+    status = clSetKernelArg(kernels[K_BIAS], 1, sizeof(cl_mem), (void*)&d_bias);
+    checkError(status, "Failed to set im2col arg 1");
+    status = clSetKernelArg(kernels[K_BIAS], 2, sizeof(int), (void*)&col);
+    checkError(status, "Failed to set im2col arg 2");
+    status = clFinish(queues[K_BIAS]);
+    
+    size_t channel_ext = row;
+    cl_event event_bias;
+    status = clEnqueueNDRangeKernel(queues[K_BIAS], kernels[K_BIAS], 1, NULL, &channel_ext, NULL, 0, NULL, &event_bias);
+    clWaitForEvents(1, &event_bias);
+
+    status = clEnqueueReadBuffer(queues[K_BIAS], d_data, CL_TRUE, 0, sizeof(float) * row * col, data, 0, NULL, NULL);
+    clFinish(queues[K_BIAS]);
+
+    if(event_bias)  clReleaseEvent(event_bias);
+    if(d_data)      clReleaseMemObject(d_data);
+    if(d_bias)      clReleaseMemObject(d_bias);
 }
 #endif
 
@@ -577,7 +606,8 @@ void ocl_conv_layer(const blob_shape_t src, const blob_shape_t filter, blob_shap
     clWaitForEvents(1, &event_im2col);
   
     int M = filter.num, K = filter.channels * filter.width * filter.height, N = dst.width * dst.height;
-    size_t wg_size[2] = {2, 2};
+    printf("M = %d, K = %d, N = %d\n", M, K, N);
+    size_t wg_size[2] = {1, 1};
     size_t g_size[2] = {N, M};
     cl_event event_gemm;
     cl_mem d_a, d_c;

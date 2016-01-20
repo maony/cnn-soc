@@ -5,11 +5,12 @@
 
 */
 #define CONV
+#define BIAS
+#define PRELU
 //#define MAX_POOLING
 //#define INNER_PRODUCT
 //#define RELU
 //#define SOFTMAX
-//#define BIAS
 
 #ifdef CONV
 #define EXT_IM2COL
@@ -17,9 +18,14 @@
 #include "im2col.cl"
 
 #define GROUP_XX
-#define BS_GEMM 2
+#define BS_GEMM 1
 #define SIMD_GEMM 1
 #include "gemm.cl"
+#endif
+
+#ifdef PRELU
+#define BS_PRELU 1
+#include "prelu.cl"
 #endif
 
 #ifdef MAX_POOLING
