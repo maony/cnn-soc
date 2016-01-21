@@ -192,27 +192,33 @@ void ocl_attribute(void) {
 	load_model_param(fp_model, offset, 16, conv01_bias);
 	offset += 16;
    
-    //ConvLayer conv01;
-    //conv01.init_param(dn, dc, dh, dw, ph, pw, sh, sw);
+    // conv01
     ConvLayer conv01(dn, dc, dh, dw, ph, pw, sh, sw);
     conv01.init_weight(fn, fh, fw, conv01_filter, conv01_bias);
     clFinish(queues[K_IM2COL]);
     conv01.forward(d_conv01_data);
-    
-    cl_mem d_conv01_out;
-    conv01.get_mem(d_conv01_out, dn, dc, dh, dw);
-    float *h_conv01_out = (float *)alignedMalloc(sizeof(float) * MUL_4(dn, dc, dh, dw));
-    status = clEnqueueReadBuffer(queues[K_IM2COL], d_conv01_out, CL_TRUE, 0, sizeof(float) * MUL_4(dn, dc, dh, dw), h_conv01_out, 0, NULL, NULL);
+    // prelu01
+    conv01.get_mem(dn, dc, dh, dw);
+    alignedFree(conv01_bias);
+    conv01_bias   = (float *)alignedMalloc(sizeof(float) * dc);
+    load_model_param(fp_model, offset, dc, conv01_bias);
+	offset += dc;
+    PreluLayer prelu01(dn, dc, dh, dw, conv01_bias);
+    prelu01.forward(conv01.top_);
+
+    //cl_mem d_conv01_out;
+    //conv01.get_mem(d_conv01_out, dn, dc, dh, dw);
+    float *h_out = (float *)alignedMalloc(sizeof(float) * MUL_4(dn, dc, dh, dw));
+    status = clEnqueueReadBuffer(queues[K_IM2COL], conv01.top_, CL_TRUE, 0, sizeof(float) * MUL_4(dn, dc, dh, dw), h_out, 0, NULL, NULL);
     clFinish(queues[K_IM2COL]);
     
-    WRITE_BIN(h_conv01_out, "conv01-out-sim.bin", MUL_4(dn, dc, dh, dw)); 
+    WRITE_BIN(h_out, "prelu01-out-sim.bin", MUL_4(dn, dc, dh, dw)); 
     
     alignedFree(conv01_data);
-    alignedFree(h_conv01_out);
+    alignedFree(h_out);
     alignedFree(conv01_filter);
-    alignedFree(conv01_bias);
     if(d_conv01_data)   clReleaseMemObject(d_conv01_data);
-    if(d_conv01_out)    clReleaseMemObject(d_conv01_out);
+    //if(d_conv01_out)    clReleaseMemObject(d_conv01_out);
 }
 
 void attribute_test(void) {

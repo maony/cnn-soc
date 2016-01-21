@@ -12,7 +12,7 @@ then
     echo "-------------------------------------------------------------------"
     # build opencl kernel emulator
     echo "----------build opencl kernel emulator----------"
-    aoc -march=emulator -v --board de1soc_sharedonly device/cnn_define.cl -o bin/im2col_sim.aocx --report
+    aoc -march=emulator --fp-relaxed --fpc -v --board de1soc_sharedonly device/cnn_define.cl -o bin/im2col_sim.aocx --report
     echo "-------------------------------------------------------------------"
     echo "----------build host---------"
     echo "-------------------------------------------------------------------"

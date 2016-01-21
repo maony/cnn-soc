@@ -44,6 +44,13 @@ void ConvLayer::init_weight(int fn, int fh, int fw, float *weight, float *bias) 
     checkError(status, "Failed to copy data to device");
     clFinish(queues[K_GEMM]);
     clFinish(queues[K_BIAS]);
+   
+    //printf(" data is %e %e\n", *bias, *(bias+1));
+    //printf(" data is %e %e\n", *weight, *(weight+1));
+    //float *h_out = (float *)alignedMalloc(sizeof(float) * n_top_ * c_top_ * h_top_ * w_top_);
+    //status = clEnqueueReadBuffer(queues[K_IM2COL], col_, CL_TRUE, 0, sizeof(float) * n_top_ * c_top_ * h_top_ * w_top_, h_out, 0, NULL, NULL);
+    //clFinish(queues[K_IM2COL]);
+    //printf(" data is %e %e\n", *h_out, *(h_out+1));
 
     col_     = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * c_bot_ * h_top_ * w_top_ * fh_ * fw_, NULL, &status);
     checkError(status, "Failed to allocate col buffer\n");
@@ -79,6 +86,11 @@ void ConvLayer::forward(cl_mem bot) {
     size_t channel_ext = c_bot_ * fh_ * fw_;
     status = clEnqueueNDRangeKernel(queues[K_IM2COL], kernels[K_IM2COL], 1, NULL, &channel_ext, NULL, 0, NULL, NULL);
     
+    //float *h_out = (float *)alignedMalloc(sizeof(float) * n_top_ * c_top_ * h_top_ * w_top_);
+    //status = clEnqueueReadBuffer(queues[K_IM2COL], col_, CL_TRUE, 0, sizeof(float) * n_top_ * c_top_ * h_top_ * w_top_, h_out, 0, NULL, NULL);
+    //clFinish(queues[K_IM2COL]);
+    //printf(" datad sd is %e %e\n", *h_out, *(h_out+128 + 128 + 8));
+    
     int M = fn_, K = fc_ * fh_ * fw_, N = h_top_ * w_top_;
     size_t wg_size[2]   = {1, 1};
     size_t g_size[2]    = {N, M};
@@ -99,12 +111,44 @@ void ConvLayer::forward(cl_mem bot) {
     g_size[0] = c_top_;
     status = clEnqueueNDRangeKernel(queues[K_BIAS], kernels[K_BIAS], 1, NULL, &g_size[0], NULL, 0, NULL, NULL);
     clFinish(queues[K_BIAS]);
+    
+    //float *h_out = (float *)alignedMalloc(sizeof(float) * n_top_ * c_top_ * h_top_ * w_top_);
+    //status = clEnqueueReadBuffer(queues[K_IM2COL], col_, CL_TRUE, 0, sizeof(float) * n_top_ * c_top_ * h_top_ * w_top_, h_out, 0, NULL, NULL);
+    //clFinish(queues[K_IM2COL]);
+    //printf(" data is %e %e\n", *h_out, *(h_out+1));
 }
 
-void ConvLayer::get_mem(cl_mem &data, int &n, int &c, int &h, int &w) {
+void ConvLayer::get_mem(int &n, int &c, int &h, int &w) {
     n = n_top_;
     c = c_top_;
     h = h_top_;
     w = w_top_;
-    data = top_;
+}
+
+PreluLayer::PreluLayer() {}
+PreluLayer::~PreluLayer() {
+    if(slope_)      clReleaseMemObject(slope_);
+}
+PreluLayer::PreluLayer(int dn, int dc, int dh, int dw, float* slope) {
+    n_ = dn;
+    c_ = dc;
+    h_ = dh;
+    w_ = dw;
+    size_ = h_ * w_;
+    g_size_ = c_;
+
+    slope_  = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * c_, NULL, &status);
+    checkError(status, "Failed to allocate col buffer\n");
+    status = clEnqueueWriteBuffer(queues[K_PRELU], slope_, CL_TRUE, 0, sizeof(float) * c_, slope, 0, NULL, NULL);
+    checkError(status, "Failed to copy data to device");
+    clFinish(queues[K_PRELU]);
+}
+
+void PreluLayer::forward(cl_mem &data) {
+    status     = clSetKernelArg(kernels[K_PRELU], 0, sizeof(cl_mem), &data);
+    status    |= clSetKernelArg(kernels[K_PRELU], 1, sizeof(cl_mem), &slope_);
+    status    |= clSetKernelArg(kernels[K_PRELU], 2, sizeof(int), &size_);
+    
+    status = clEnqueueNDRangeKernel(queues[K_PRELU], kernels[K_PRELU], 1, NULL, &g_size_, NULL, 0, NULL, NULL);
+    clFinish(queues[K_PRELU]);
 }

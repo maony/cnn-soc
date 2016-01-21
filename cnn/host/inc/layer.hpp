@@ -20,7 +20,7 @@ class ConvLayer {
         ~ConvLayer();
         ConvLayer(int dn, int dc, int dh, int dw, int ph, int pw, int sh, int sw);
         void init_weight(int fn, int fh, int fw, float *weight, float *bias);
-        void get_mem(cl_mem &data, int &dn, int &dc, int &dh, int &dw);
+        void get_mem(int &dn, int &dc, int &dh, int &dw);
         void forward(cl_mem bot);
     private:
         int n_bot_, c_bot_, h_bot_, w_bot_;
@@ -28,7 +28,9 @@ class ConvLayer {
         int ph_, pw_, sh_, sw_;
         int fn_, fc_, fh_, fw_;
         int offset_bot_, offset_top_;
-        cl_mem weight_, bias_, top_, col_;
+        cl_mem weight_, bias_, col_;
+    public:
+        cl_mem top_;
 };
 
 class PreluLayer {
@@ -36,10 +38,12 @@ class PreluLayer {
         PreluLayer();
         PreluLayer(int dn, int dc, int dh, int dw, float *slope);
         ~PreluLayer();
+        void forward(cl_mem &data);
     private:
-        int n_, c_, h_, w_;
+        int n_, c_, h_, w_, size_;
+        size_t g_size_;
         cl_mem slope_;
-}
+};
 
 #endif
 
