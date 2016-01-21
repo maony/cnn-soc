@@ -40,10 +40,10 @@ void ConvLayer::init_weight(int fn, int fh, int fw, float *weight, float *bias) 
     checkError(status, "Failed to copy data to device");
     bias_    = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * c_top_, NULL, &status);
     checkError(status, "Failed to allocate bias buffer\n");
-    status = clEnqueueWriteBuffer(queues[K_BIAS], bias_, CL_TRUE, 0, sizeof(float) * c_top_, bias, 0, NULL, NULL);
+    status = clEnqueueWriteBuffer(queues[K_GEMM], bias_, CL_TRUE, 0, sizeof(float) * c_top_, bias, 0, NULL, NULL);
     checkError(status, "Failed to copy data to device");
     clFinish(queues[K_GEMM]);
-    clFinish(queues[K_BIAS]);
+    //clFinish(queues[K_BIAS]);
    
     //printf(" data is %e %e\n", *bias, *(bias+1));
     //printf(" data is %e %e\n", *weight, *(weight+1));
@@ -102,15 +102,16 @@ void ConvLayer::forward(cl_mem bot) {
     status    |= clSetKernelArg(kernels[K_GEMM], 3, sizeof(int), &M);
     status    |= clSetKernelArg(kernels[K_GEMM], 4, sizeof(int), &K);
     status    |= clSetKernelArg(kernels[K_GEMM], 5, sizeof(int), &N);
+    status    |= clSetKernelArg(kernels[K_GEMM], 6, sizeof(cl_mem), &bias_);
     status = clEnqueueNDRangeKernel(queues[K_GEMM], kernels[K_GEMM], 2, NULL, g_size, wg_size, 0, NULL, NULL);
     clFinish(queues[K_GEMM]);
     
-    status     = clSetKernelArg(kernels[K_BIAS], 0, sizeof(cl_mem), &top_);
-    status    |= clSetKernelArg(kernels[K_BIAS], 1, sizeof(cl_mem), &bias_);
-    status    |= clSetKernelArg(kernels[K_BIAS], 2, sizeof(int), &N);
-    g_size[0] = c_top_;
-    status = clEnqueueNDRangeKernel(queues[K_BIAS], kernels[K_BIAS], 1, NULL, &g_size[0], NULL, 0, NULL, NULL);
-    clFinish(queues[K_BIAS]);
+    //status     = clSetKernelArg(kernels[K_BIAS], 0, sizeof(cl_mem), &top_);
+    //status    |= clSetKernelArg(kernels[K_BIAS], 1, sizeof(cl_mem), &bias_);
+    //status    |= clSetKernelArg(kernels[K_BIAS], 2, sizeof(int), &N);
+    //g_size[0] = c_top_;
+    //status = clEnqueueNDRangeKernel(queues[K_BIAS], kernels[K_BIAS], 1, NULL, &g_size[0], NULL, 0, NULL, NULL);
+    //clFinish(queues[K_BIAS]);
     
     //float *h_out = (float *)alignedMalloc(sizeof(float) * n_top_ * c_top_ * h_top_ * w_top_);
     //status = clEnqueueReadBuffer(queues[K_IM2COL], col_, CL_TRUE, 0, sizeof(float) * n_top_ * c_top_ * h_top_ * w_top_, h_out, 0, NULL, NULL);
@@ -151,4 +152,47 @@ void PreluLayer::forward(cl_mem &data) {
     
     status = clEnqueueNDRangeKernel(queues[K_PRELU], kernels[K_PRELU], 1, NULL, &g_size_, NULL, 0, NULL, NULL);
     clFinish(queues[K_PRELU]);
+}
+
+
+MaxPoolingLayer::MaxPoolingLayer() {}
+MaxPoolingLayer::~MaxPoolingLayer() {
+    if(pool_)   clReleaseMemObject(pool_);
+}
+MaxPoolingLayer::MaxPoolingLayer(int dn, int dc, int dh, int dw, int ph, int pw, int sh, int sw, int kh, int kw) {
+    n_bot_ = dn;    c_bot_ = dc;    h_bot_ = dh;    w_bot_ = dw;
+    ph_    = ph;    pw_    = pw;    sh_    = sh;    sw_    = sw;
+    kh_    = kh;    kw_    = kw;
+    n_top_ = n_bot_;    c_top_ = c_bot_;
+    h_top_ = (h_bot_ + 2 * ph_ - sh_) / sh_ + 1;
+    w_top_ = (w_bot_ + 2 * pw_ - sw_) / sw_ + 1;
+    size_bot_ = h_bot_ * w_bot_;
+    size_top_ = h_top_ * w_top_;
+    size_g_   = c_top_ * size_top_;
+
+    pool_  = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * n_top_ * c_top_ * size_top_, NULL, &status);
+    checkError(status, "Failed to allocate pool buffer\n");
+}
+
+void MaxPoolingLayer::get_mem(int &n, int &c, int &h, int &w) {
+    n = n_top_;
+    c = c_top_;
+    h = h_top_;
+    w = w_top_;
+}
+
+void MaxPoolingLayer::forward(cl_mem data) {
+    status     = clSetKernelArg(kernels[K_MAX_POOLING], 0, sizeof(cl_mem), &data);
+    status    |= clSetKernelArg(kernels[K_MAX_POOLING], 1, sizeof(cl_mem), &pool_);
+    status    |= clSetKernelArg(kernels[K_MAX_POOLING], 2, sizeof(int), &h_bot_);
+    status    |= clSetKernelArg(kernels[K_MAX_POOLING], 3, sizeof(int), &w_bot_);
+    status    |= clSetKernelArg(kernels[K_MAX_POOLING], 4, sizeof(int), &h_top_);
+    status    |= clSetKernelArg(kernels[K_MAX_POOLING], 5, sizeof(int), &w_top_);
+    status    |= clSetKernelArg(kernels[K_MAX_POOLING], 6, sizeof(int), &size_bot_);
+    status    |= clSetKernelArg(kernels[K_MAX_POOLING], 7, sizeof(int), &sh_);
+    status    |= clSetKernelArg(kernels[K_MAX_POOLING], 8, sizeof(int), &kh_);
+    status    |= clSetKernelArg(kernels[K_MAX_POOLING], 9, sizeof(int), &ph_);
+    
+    status = clEnqueueNDRangeKernel(queues[K_MAX_POOLING], kernels[K_MAX_POOLING], 1, NULL, &size_g_, NULL, 0, NULL, NULL);
+    clFinish(queues[K_MAX_POOLING]);
 }

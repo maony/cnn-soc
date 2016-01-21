@@ -1,18 +1,21 @@
 /*
 * matrix mult
 * M, N, K all modulo block size should be zero
-* Pointer point to Matrix A, B should avoid aliasing
-*
+
 */
 
 #ifdef GROUP_XX
+/*
+    opt: add bias
+*/
 __kernel
 __attribute((reqd_work_group_size(BS_GEMM, BS_GEMM, 1)))
 __attribute((num_simd_work_items(SIMD_GEMM)))
 void gemm(__global float *restrict C,
           __global float *restrict A,
           __global float *restrict B,
-          int M, int K, int N) {
+          int M, int K, int N,
+          __global float *restrict bias) {
     const int Aw = K;
     const int Bw = N;
 
@@ -35,6 +38,7 @@ void gemm(__global float *restrict C,
     int a_index = a_start;
     int b_index = b_start;
     float sum = 0.0f;
+    float value = bias[get_global_id(1)];
 
     // loop iteration to process one block
     for(; a_index <= a_end; a_index += BS_GEMM, b_index += (BS_GEMM * Bw)) {
@@ -54,7 +58,7 @@ void gemm(__global float *restrict C,
         // synchronize
         barrier(CLK_LOCAL_MEM_FENCE);
     }
-    C[get_global_id(1) * get_global_size(0) + get_global_id(0)] = sum;
+    C[get_global_id(1) * get_global_size(0) + get_global_id(0)] = sum + value;
 }
 #else
 __kernel

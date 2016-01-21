@@ -3,12 +3,12 @@
 
 #define IM2COL
 #define GEMM
-#define BIAS
 #define PRELU
-//#define MAX_POOLING
+#define MAX_POOLING
 //#define RELU
 //#define INNER_PRODUCT
 //#define SOFTMAX
+//#define BIAS
 
 // The set of simultaneous kernels
 enum KERNELS {

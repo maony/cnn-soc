@@ -196,6 +196,7 @@ void ocl_attribute(void) {
     ConvLayer conv01(dn, dc, dh, dw, ph, pw, sh, sw);
     conv01.init_weight(fn, fh, fw, conv01_filter, conv01_bias);
     clFinish(queues[K_IM2COL]);
+    
     conv01.forward(d_conv01_data);
     // prelu01
     conv01.get_mem(dn, dc, dh, dw);
@@ -204,15 +205,20 @@ void ocl_attribute(void) {
     load_model_param(fp_model, offset, dc, conv01_bias);
 	offset += dc;
     PreluLayer prelu01(dn, dc, dh, dw, conv01_bias);
+    
     prelu01.forward(conv01.top_);
+    // pool0
+    MaxPoolingLayer pool0(dn, dc, dh, dw, 0, 0, 2, 2, 2, 2);
+    pool0.forward(conv01.top_);
+    pool0.get_mem(dn, dc, dh, dw);
 
     //cl_mem d_conv01_out;
     //conv01.get_mem(d_conv01_out, dn, dc, dh, dw);
     float *h_out = (float *)alignedMalloc(sizeof(float) * MUL_4(dn, dc, dh, dw));
-    status = clEnqueueReadBuffer(queues[K_IM2COL], conv01.top_, CL_TRUE, 0, sizeof(float) * MUL_4(dn, dc, dh, dw), h_out, 0, NULL, NULL);
+    status = clEnqueueReadBuffer(queues[K_IM2COL], pool0.pool_, CL_TRUE, 0, sizeof(float) * MUL_4(dn, dc, dh, dw), h_out, 0, NULL, NULL);
     clFinish(queues[K_IM2COL]);
     
-    WRITE_BIN(h_out, "prelu01-out-sim.bin", MUL_4(dn, dc, dh, dw)); 
+    WRITE_BIN(h_out, "pool0-out-sim.bin", MUL_4(dn, dc, dh, dw)); 
     
     alignedFree(conv01_data);
     alignedFree(h_out);

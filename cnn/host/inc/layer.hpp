@@ -45,5 +45,21 @@ class PreluLayer {
         cl_mem slope_;
 };
 
+class MaxPoolingLayer {
+    public:
+        MaxPoolingLayer();
+        MaxPoolingLayer(int dn, int dc, int dh, int dw, int ph, int pw, int sh, int sw, int kh, int kw);
+        ~MaxPoolingLayer();
+        void forward(cl_mem data);
+        void get_mem(int &dn, int &dc, int &dh, int &dw);
+        cl_mem pool_;
+    private:
+        int n_bot_, c_bot_, h_bot_, w_bot_;
+        int n_top_, c_top_, h_top_, w_top_;
+        int ph_, pw_, sh_, sw_, kh_, kw_;
+        int size_bot_, size_top_;
+        size_t size_g_;
+};
+
 #endif
 

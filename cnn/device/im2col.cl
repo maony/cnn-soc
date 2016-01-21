@@ -58,8 +58,16 @@ void im2col (__global float *restrict data_img,
 
     for(int h = 0; h < height_col; h++) {
         for(int w = 0; w < width_col; w++) {
+            // Assume stride is always 1 or 2
+#if 1
+            w_pad = (size_stride & 0x01) ? w : w << 1;
+            h_pad = (size_stride & 0x01) ? h : h << 1;
+            w_pad = w_pad - size_pad + w_offset;
+            h_pad = h_pad - size_pad + h_offset;
+#else
             w_pad = w * size_stride - size_pad + w_offset;
             h_pad = h * size_stride - size_pad + h_offset;
+#endif
             if(w_pad >= 0 && w_pad < width_img && h_pad >= 0 && h_pad < height_img)
                 ptr_col[h*width_col+w] = ptr_img[h_pad*width_img+w_pad];
             else
