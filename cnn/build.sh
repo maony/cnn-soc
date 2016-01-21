@@ -36,7 +36,7 @@ then
     # aoc -v --fp-relaxed --fpc --board de1soc_sharedonly device/cnn_define.cl -o bin/max_pooling.aocx --report --profile
     # aoc -v --fp-relaxed --fpc --board de1soc_sharedonly device/cnn_define.cl -o bin/relu.aocx --report --profile
     # aoc -v --fp-relaxed --fpc --board de1soc_sharedonly device/cnn_define.cl -o bin/softmax.aocx --report --profile
-    aoc -v --fp-relaxed --fpc --board de1soc_sharedonly device/cnn_define.cl -o bin/conv.aocx --report --profile
+    aoc -v --fp-relaxed --fpc --util 95 -O3 --board de1soc_sharedonly device/cnn_define.cl -o bin/conv_opt.aocx --report --profile
     # aoc -v --fp-relaxed --fpc --board de1soc_sharedonly device/cnn_define.cl -o bin/inner_product.aocx --report --profile
     # aoc -v --fp-relaxed --fpc --board de1soc_sharedonly device/cnn_define.cl -o bin/conv.aocx --report
     # aoc -v --sw-dimm-partition --fp-relaxed --util 95 -O3 --board de1soc_sharedonly matrix_mult.cl -o bin/matrix_mult_8x8_default.aocx --report

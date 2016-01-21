@@ -18,6 +18,7 @@ void prelu (__global float *restrict data,
     int offset      = index * column;
     float temp;
 
+    #pragma unroll 0
     for(i = 0; i < column; i++) {
         temp = data[offset+i];    
         data[offset + i] = (temp > 0) ? temp : temp * value; 

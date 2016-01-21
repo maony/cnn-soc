@@ -188,25 +188,38 @@ void ocl_attribute(void) {
    
 #define FREE(x) \
     do {        \
-        alignedFree(x); x = NULL; \
+        if(x) { alignedFree(x); x = NULL; } \
     } while(0)
+
+#define INIT_CONV() \
+    do {    \
+        conv01_filter = (float *)alignedMalloc(sizeof(float) * MUL_4(fn, fc, fh, fw));\
+        conv01_bias   = (float *)alignedMalloc(sizeof(float) * fn);\
+        load_model_param(fp_model, offset, MUL_4(fn, fc, fh, fw), conv01_filter);\
+	    offset += MUL_4(fn, fc, fh, fw);\
+	    load_model_param(fp_model, offset, fn, conv01_bias);\
+	    offset += fn;\
+    } while(0)
+
+#define INIT_PRELU() \
+    do {    \
+        conv01_bias   = (float *)alignedMalloc(sizeof(float) * dc);\
+        load_model_param(fp_model, offset, dc, conv01_bias);\
+	    offset += dc;\
+    } while(0)
+
+    float *conv01_filter;
+    float *conv01_bias;
     // -----------init start------------------
     // conv01
-    float *conv01_filter = (float *)alignedMalloc(sizeof(float) * MUL_4(fn, fc, fh, fw));
-    float *conv01_bias   = (float *)alignedMalloc(sizeof(float) * 16);
-    load_model_param(fp_model, offset, MUL_4(fn, fc, fh, fw), conv01_filter);
-	offset += MUL_4(fn, fc, fh, fw);
-	load_model_param(fp_model, offset, 16, conv01_bias);
-	offset += 16;
+    INIT_CONV();
     ConvLayer conv01(dn, dc, dh, dw, ph, pw, sh, sw);
     conv01.init_weight(fn, fh, fw, conv01_filter, conv01_bias);
     FREE(conv01_bias);
     FREE(conv01_filter);
     conv01.get_mem(dn, dc, dh, dw);
     // prelu01
-    conv01_bias   = (float *)alignedMalloc(sizeof(float) * dc);
-    load_model_param(fp_model, offset, dc, conv01_bias);
-	offset += dc;
+    INIT_PRELU();
     PreluLayer prelu01(dn, dc, dh, dw, conv01_bias);
     FREE(conv01_bias);
     // pool0
@@ -215,147 +228,211 @@ void ocl_attribute(void) {
     // conv11
     fn = 16; fc = dc; fh = 3; fw = 3;
     ph = fh / 2; pw = fw / 2; sh = 1;   sw = 1;
-    conv01_filter = (float *)alignedMalloc(sizeof(float) * MUL_4(fn, fc, fh, fw));
-    conv01_bias   = (float *)alignedMalloc(sizeof(float) * fn);
-    load_model_param(fp_model, offset, MUL_4(fn, fc, fh, fw), conv01_filter);
-	offset += MUL_4(fn, fc, fh, fw);
-	load_model_param(fp_model, offset, fn, conv01_bias);
-	offset += fn;
+    INIT_CONV();
     ConvLayer conv11(dn, dc, dh, dw, ph, pw, sh, sw);
     conv11.init_weight(fn, fh, fw, conv01_filter, conv01_bias);
     FREE(conv01_bias);
     FREE(conv01_filter);
     conv11.get_mem(dn, dc, dh, dw);
     // prelu11
-    conv01_bias   = (float *)alignedMalloc(sizeof(float) * dc);
-    load_model_param(fp_model, offset, dc, conv01_bias);
-	offset += dc;
+    INIT_PRELU();
     PreluLayer prelu11(dn, dc, dh, dw, conv01_bias);
     FREE(conv01_bias);
     // conv12
     fn = 16; fc = dc; fh = 3; fw = 3;
     ph = fh / 2; pw = fw / 2; sh = 1;   sw = 1;
-    conv01_filter = (float *)alignedMalloc(sizeof(float) * MUL_4(fn, fc, fh, fw));
-    conv01_bias   = (float *)alignedMalloc(sizeof(float) * fn);
-    load_model_param(fp_model, offset, MUL_4(fn, fc, fh, fw), conv01_filter);
-	offset += MUL_4(fn, fc, fh, fw);
-	load_model_param(fp_model, offset, fn, conv01_bias);
-	offset += fn;
+    INIT_CONV();
     ConvLayer conv12(dn, dc, dh, dw, ph, pw, sh, sw);
     conv12.init_weight(fn, fh, fw, conv01_filter, conv01_bias);
     FREE(conv01_bias);
     FREE(conv01_filter);
     conv12.get_mem(dn, dc, dh, dw);
     // prelu12
-    conv01_bias   = (float *)alignedMalloc(sizeof(float) * dc);
-    load_model_param(fp_model, offset, dc, conv01_bias);
-	offset += dc;
+    INIT_PRELU();
     PreluLayer prelu12(dn, dc, dh, dw, conv01_bias);
     FREE(conv01_bias);
     // conv13
     fn = 32; fc = dc; fh = 3; fw = 3;
     ph = fh / 2; pw = fw / 2; sh = 1;   sw = 1;
-    conv01_filter = (float *)alignedMalloc(sizeof(float) * MUL_4(fn, fc, fh, fw));
-    conv01_bias   = (float *)alignedMalloc(sizeof(float) * fn);
-    load_model_param(fp_model, offset, MUL_4(fn, fc, fh, fw), conv01_filter);
-	offset += MUL_4(fn, fc, fh, fw);
-	load_model_param(fp_model, offset, fn, conv01_bias);
-	offset += fn;
+    INIT_CONV();
     ConvLayer conv13(dn, dc, dh, dw, ph, pw, sh, sw);
     conv13.init_weight(fn, fh, fw, conv01_filter, conv01_bias);
     FREE(conv01_bias);
     FREE(conv01_filter);
     conv13.get_mem(dn, dc, dh, dw);
     // prelu13
-    conv01_bias   = (float *)alignedMalloc(sizeof(float) * dc);
-    load_model_param(fp_model, offset, dc, conv01_bias);
-	offset += dc;
+    INIT_PRELU();
     PreluLayer prelu13(dn, dc, dh, dw, conv01_bias);
     FREE(conv01_bias);
     // conv14
     fn = 32; fc = dc; fh = 3; fw = 3;
     ph = fh / 2; pw = fw / 2; sh = 1;   sw = 1;
-    conv01_filter = (float *)alignedMalloc(sizeof(float) * MUL_4(fn, fc, fh, fw));
-    conv01_bias   = (float *)alignedMalloc(sizeof(float) * fn);
-    load_model_param(fp_model, offset, MUL_4(fn, fc, fh, fw), conv01_filter);
-	offset += MUL_4(fn, fc, fh, fw);
-	load_model_param(fp_model, offset, fn, conv01_bias);
-	offset += fn;
+    INIT_CONV();
     ConvLayer conv14(dn, dc, dh, dw, ph, pw, sh, sw);
     conv14.init_weight(fn, fh, fw, conv01_filter, conv01_bias);
     FREE(conv01_bias);
     FREE(conv01_filter);
     conv14.get_mem(dn, dc, dh, dw);
     // prelu14
-    conv01_bias   = (float *)alignedMalloc(sizeof(float) * dc);
-    load_model_param(fp_model, offset, dc, conv01_bias);
-	offset += dc;
+    INIT_PRELU();
     PreluLayer prelu14(dn, dc, dh, dw, conv01_bias);
     FREE(conv01_bias);
     // pool1
     MaxPoolingLayer pool1(dn, dc, dh, dw, 0, 0, 2, 2, 2, 2);
     pool1.get_mem(dn, dc, dh, dw);
+    
     // conv21
     fn = 48; fc = dc; fh = 3; fw = 3;
     ph = fh / 2; pw = fw / 2; sh = 1;   sw = 1;
-    conv01_filter = (float *)alignedMalloc(sizeof(float) * MUL_4(fn, fc, fh, fw));
-    conv01_bias   = (float *)alignedMalloc(sizeof(float) * fn);
-    load_model_param(fp_model, offset, MUL_4(fn, fc, fh, fw), conv01_filter);
-	offset += MUL_4(fn, fc, fh, fw);
-	load_model_param(fp_model, offset, fn, conv01_bias);
-	offset += fn;
+    INIT_CONV();
     ConvLayer conv21(dn, dc, dh, dw, ph, pw, sh, sw);
     conv21.init_weight(fn, fh, fw, conv01_filter, conv01_bias);
     FREE(conv01_bias);
     FREE(conv01_filter);
     conv21.get_mem(dn, dc, dh, dw);
     // prelu21
-    conv01_bias   = (float *)alignedMalloc(sizeof(float) * dc);
-    load_model_param(fp_model, offset, dc, conv01_bias);
-	offset += dc;
+    INIT_PRELU();
     PreluLayer prelu21(dn, dc, dh, dw, conv01_bias);
     FREE(conv01_bias);
     // conv22
     fn = 48; fc = dc; fh = 3; fw = 3;
     ph = fh / 2; pw = fw / 2; sh = 1;   sw = 1;
-    conv01_filter = (float *)alignedMalloc(sizeof(float) * MUL_4(fn, fc, fh, fw));
-    conv01_bias   = (float *)alignedMalloc(sizeof(float) * fn);
-    load_model_param(fp_model, offset, MUL_4(fn, fc, fh, fw), conv01_filter);
-	offset += MUL_4(fn, fc, fh, fw);
-	load_model_param(fp_model, offset, fn, conv01_bias);
-	offset += fn;
+    INIT_CONV();
     ConvLayer conv22(dn, dc, dh, dw, ph, pw, sh, sw);
     conv22.init_weight(fn, fh, fw, conv01_filter, conv01_bias);
     FREE(conv01_bias);
     FREE(conv01_filter);
     conv22.get_mem(dn, dc, dh, dw);
     // prelu22
-    conv01_bias   = (float *)alignedMalloc(sizeof(float) * dc);
-    load_model_param(fp_model, offset, dc, conv01_bias);
-	offset += dc;
+    INIT_PRELU();
     PreluLayer prelu22(dn, dc, dh, dw, conv01_bias);
     FREE(conv01_bias);
     // conv23
     fn = 64; fc = dc; fh = 3; fw = 3;
     ph = fh / 2; pw = fw / 2; sh = 1;   sw = 1;
-    conv01_filter = (float *)alignedMalloc(sizeof(float) * MUL_4(fn, fc, fh, fw));
-    conv01_bias   = (float *)alignedMalloc(sizeof(float) * fn);
-    load_model_param(fp_model, offset, MUL_4(fn, fc, fh, fw), conv01_filter);
-	offset += MUL_4(fn, fc, fh, fw);
-	load_model_param(fp_model, offset, fn, conv01_bias);
-	offset += fn;
+    INIT_CONV();
     ConvLayer conv23(dn, dc, dh, dw, ph, pw, sh, sw);
     conv23.init_weight(fn, fh, fw, conv01_filter, conv01_bias);
     FREE(conv01_bias);
     FREE(conv01_filter);
     conv23.get_mem(dn, dc, dh, dw);
     // prelu23
-    conv01_bias   = (float *)alignedMalloc(sizeof(float) * dc);
-    load_model_param(fp_model, offset, dc, conv01_bias);
-	offset += dc;
+    INIT_PRELU();
     PreluLayer prelu23(dn, dc, dh, dw, conv01_bias);
     FREE(conv01_bias);
+    // conv24
+    fn = 64; fc = dc; fh = 3; fw = 3;
+    ph = fh / 2; pw = fw / 2; sh = 1;   sw = 1;
+    INIT_CONV();
+    ConvLayer conv24(dn, dc, dh, dw, ph, pw, sh, sw);
+    conv24.init_weight(fn, fh, fw, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    conv24.get_mem(dn, dc, dh, dw);
+    // prelu24
+    INIT_PRELU();
+    PreluLayer prelu24(dn, dc, dh, dw, conv01_bias);
+    FREE(conv01_bias);
+    // conv25
+    fn = 80; fc = dc; fh = 3; fw = 3;
+    ph = fh / 2; pw = fw / 2; sh = 1;   sw = 1;
+    INIT_CONV();
+    ConvLayer conv25(dn, dc, dh, dw, ph, pw, sh, sw);
+    conv25.init_weight(fn, fh, fw, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    conv25.get_mem(dn, dc, dh, dw);
+    // prelu25
+    INIT_PRELU();
+    PreluLayer prelu25(dn, dc, dh, dw, conv01_bias);
+    FREE(conv01_bias);
+    // conv26
+    fn = 80; fc = dc; fh = 3; fw = 3;
+    ph = fh / 2; pw = fw / 2; sh = 1;   sw = 1;
+    INIT_CONV();
+    ConvLayer conv26(dn, dc, dh, dw, ph, pw, sh, sw);
+    conv26.init_weight(fn, fh, fw, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    conv26.get_mem(dn, dc, dh, dw);
+    // prelu26
+    INIT_PRELU();
+    PreluLayer prelu26(dn, dc, dh, dw, conv01_bias);
+    FREE(conv01_bias);
+    // pool2
+    MaxPoolingLayer pool2(dn, dc, dh, dw, 0, 0, 2, 2, 2, 2);
+    pool2.get_mem(dn, dc, dh, dw);
     
+    // conv31
+    fn = 160; fc = dc; fh = 3; fw = 3;
+    ph = fh / 2; pw = fw / 2; sh = 1;   sw = 1;
+    INIT_CONV();
+    ConvLayer conv31(dn, dc, dh, dw, ph, pw, sh, sw);
+    conv31.init_weight(fn, fh, fw, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    conv31.get_mem(dn, dc, dh, dw);
+    // prelu31
+    INIT_PRELU();
+    PreluLayer prelu31(dn, dc, dh, dw, conv01_bias);
+    FREE(conv01_bias);
+    // conv32
+    fn = 160; fc = dc; fh = 3; fw = 3;
+    ph = fh / 2; pw = fw / 2; sh = 1;   sw = 1;
+    INIT_CONV();
+    ConvLayer conv32(dn, dc, dh, dw, ph, pw, sh, sw);
+    conv32.init_weight(fn, fh, fw, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    conv32.get_mem(dn, dc, dh, dw);
+    // prelu32
+    INIT_PRELU();
+    PreluLayer prelu32(dn, dc, dh, dw, conv01_bias);
+    FREE(conv01_bias);
+    // conv33
+    fn = 160; fc = dc; fh = 3; fw = 3;
+    ph = fh / 2; pw = fw / 2; sh = 1;   sw = 1;
+    INIT_CONV();
+    ConvLayer conv33(dn, dc, dh, dw, ph, pw, sh, sw);
+    conv33.init_weight(fn, fh, fw, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    conv33.get_mem(dn, dc, dh, dw);
+    // prelu33
+    INIT_PRELU();
+    PreluLayer prelu33(dn, dc, dh, dw, conv01_bias);
+    FREE(conv01_bias);
+    // conv34
+    fn = 160; fc = dc; fh = 3; fw = 3;
+    ph = fh / 2; pw = fw / 2; sh = 1;   sw = 1;
+    INIT_CONV();
+    ConvLayer conv34(dn, dc, dh, dw, ph, pw, sh, sw);
+    conv34.init_weight(fn, fh, fw, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    conv34.get_mem(dn, dc, dh, dw);
+    // prelu34
+    INIT_PRELU();
+    PreluLayer prelu34(dn, dc, dh, dw, conv01_bias);
+    FREE(conv01_bias);
+    // pool3
+    MaxPoolingLayer pool3(dn, dc, dh, dw, 0, 0, 2, 2, 2, 2);
+    pool3.get_mem(dn, dc, dh, dw);
+    
+    // conv41
+    fn = 64; fc = dc; fh = 5; fw = 5;
+    ph = fh / 2; pw = fw / 2; sh = 1;   sw = 1;
+    INIT_CONV();
+    ConvLayer conv41(dn, dc, dh, dw, ph, pw, sh, sw);
+    conv41.init_weight(fn, fh, fw, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    conv41.get_mem(dn, dc, dh, dw);
+    // prelu41
+    INIT_PRELU();
+    PreluLayer prelu41(dn, dc, dh, dw, conv01_bias);
+    FREE(conv01_bias);
+
     // -------------------cnn net start----------------------------
     conv01.forward(d_conv01_data);
     prelu01.forward(conv01.top_);
@@ -370,14 +447,40 @@ void ocl_attribute(void) {
     prelu14.forward(conv14.top_);
     pool1.forward(conv14.top_);
 
+    conv21.forward(pool1.pool_);
+    prelu21.forward(conv21.top_);
+    conv22.forward(conv21.top_);
+    prelu22.forward(conv22.top_);
+    conv23.forward(conv22.top_);
+    prelu23.forward(conv23.top_);
+    conv24.forward(conv23.top_);
+    prelu24.forward(conv24.top_);
+    conv25.forward(conv24.top_);
+    prelu25.forward(conv25.top_);
+    conv26.forward(conv25.top_);
+    prelu26.forward(conv26.top_);
+    pool2.forward(conv26.top_);
+
+    conv31.forward(pool2.pool_);
+    prelu31.forward(conv31.top_);
+    conv32.forward(conv31.top_);
+    prelu32.forward(conv32.top_);
+    conv33.forward(conv32.top_);
+    prelu33.forward(conv33.top_);
+    conv34.forward(conv33.top_);
+    prelu34.forward(conv34.top_);
+    pool3.forward(conv34.top_);
+
+    conv41.forward(pool3.pool_);
+    prelu41.forward(conv41.top_);
 
     //cl_mem d_conv01_out;
     //conv01.get_mem(d_conv01_out, dn, dc, dh, dw);
     float *h_out = (float *)alignedMalloc(sizeof(float) * MUL_4(dn, dc, dh, dw));
-    status = clEnqueueReadBuffer(queues[K_IM2COL], pool1.pool_, CL_TRUE, 0, sizeof(float) * MUL_4(dn, dc, dh, dw), h_out, 0, NULL, NULL);
+    status = clEnqueueReadBuffer(queues[K_IM2COL], conv41.top_, CL_TRUE, 0, sizeof(float) * MUL_4(dn, dc, dh, dw), h_out, 0, NULL, NULL);
     clFinish(queues[K_IM2COL]);
     
-    WRITE_BIN(h_out, "pool1-out-fpga.bin", MUL_4(dn, dc, dh, dw)); 
+    WRITE_BIN(h_out, "prelu41-out-fpga.bin", MUL_4(dn, dc, dh, dw)); 
     
     if(conv01_data)     alignedFree(conv01_data);
     if(h_out)           alignedFree(h_out);

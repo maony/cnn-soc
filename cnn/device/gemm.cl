@@ -41,6 +41,7 @@ void gemm(__global float *restrict C,
     float value = bias[get_global_id(1)];
 
     // loop iteration to process one block
+    #pragma unroll 0
     for(; a_index <= a_end; a_index += BS_GEMM, b_index += (BS_GEMM * Bw)) {
         b_local[y_local][x_local] = B[b_index + Bw * y_local + x_local];
         a_local[y_local][x_local] = A[a_index + Aw * y_local + x_local];
@@ -50,7 +51,7 @@ void gemm(__global float *restrict C,
         barrier(CLK_LOCAL_MEM_FENCE);
 
         // dot product
-        #pragma unroll
+        #pragma unroll 0
         for(int k = 0; k < BS_GEMM; k++) {
             sum += a_local[y_local][k] * b_local[k][x_local];
         }

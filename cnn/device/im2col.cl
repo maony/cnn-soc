@@ -55,8 +55,10 @@ void im2col (__global float *restrict data_img,
     ptr_col += index * offset_col;
     __global float * restrict ptr_img = data_img;
     ptr_img += c_offset * offset_img;
-
+    
+    #pragma unroll 0
     for(int h = 0; h < height_col; h++) {
+        #pragma unroll 0
         for(int w = 0; w < width_col; w++) {
             // Assume stride is always 1 or 2
 #if 1

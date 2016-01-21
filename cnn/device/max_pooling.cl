@@ -33,7 +33,9 @@ void max_pooling (__global float *restrict data_input,
     int offset;
     float iter;
 
+    #pragma unroll 0
     for(int h = hstart; h < hend; h++) {
+        #pragma unroll 0
         for(int w = wstart; w < wend; w++) {
             offset = h * width + w;
             iter = ptr_input[offset];
