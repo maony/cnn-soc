@@ -1,6 +1,8 @@
 
 #include "layer.hpp"
 
+
+#if defined(IM2COL) && defined(GEMM)
 ConvLayer::ConvLayer(){}
 
 ConvLayer::ConvLayer(int dn, int dc, int dh, int dw, int ph, int pw, int sh, int sw) {
@@ -125,7 +127,10 @@ void ConvLayer::get_mem(int &n, int &c, int &h, int &w) {
     h = h_top_;
     w = w_top_;
 }
+#endif
 
+
+#ifdef PRELU
 PreluLayer::PreluLayer() {}
 PreluLayer::~PreluLayer() {
     if(slope_)      clReleaseMemObject(slope_);
@@ -153,8 +158,9 @@ void PreluLayer::forward(cl_mem &data) {
     status = clEnqueueNDRangeKernel(queues[K_PRELU], kernels[K_PRELU], 1, NULL, &g_size_, NULL, 0, NULL, NULL);
     clFinish(queues[K_PRELU]);
 }
+#endif
 
-
+#ifdef MAX_POOLING
 MaxPoolingLayer::MaxPoolingLayer() {}
 MaxPoolingLayer::~MaxPoolingLayer() {
     if(pool_)   clReleaseMemObject(pool_);
@@ -196,3 +202,60 @@ void MaxPoolingLayer::forward(cl_mem data) {
     status = clEnqueueNDRangeKernel(queues[K_MAX_POOLING], kernels[K_MAX_POOLING], 1, NULL, &size_g_, NULL, 0, NULL, NULL);
     clFinish(queues[K_MAX_POOLING]);
 }
+#endif
+
+#ifdef INNER_PRODUCT
+InnerProductLayer::InnerProductLayer() {}
+InnerProductLayer::~InnerProductLayer() {
+    if(inner_)      clReleaseMemObject(inner_);
+    if(weight_)     clReleaseMemObject(weight_);
+    if(bias_)       clReleaseMemObject(bias_);
+}
+InnerProductLayer::InnerProductLayer(int dn, int dc, int dh, int dw, int fn, float *weight, float *bias) {
+    row_ = fn;
+    col_ = dn * dc * dh * dw;
+    printf("row %d, col %d\n", row_, col_);
+
+    inner_  = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * row_, NULL, &status);
+    checkError(status, "Failed to allocate inner buffer\n");
+    //if(status != CL_SUCCESS) printf("create inner error\n");
+    weight_ = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * row_ * col_, NULL, &status);
+    checkError(status, "Failed to allocate inner buffer\n");
+    bias_   = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * row_, NULL, &status);
+    checkError(status, "Failed to allocate inner buffer\n");
+    
+    status = clEnqueueWriteBuffer(queues[K_PRELU], weight_, CL_TRUE, 0, sizeof(float) * row_ * col_, weight, 0, NULL, NULL);
+    checkError(status, "Failed to copy data to device");
+    clFinish(queues[K_PRELU]);
+    status = clEnqueueWriteBuffer(queues[K_INNER_PRODUCT], bias_, CL_TRUE, 0, sizeof(float) * row_, bias, 0, NULL, NULL);
+    checkError(status, "Failed to copy data to device");
+    clFinish(queues[K_INNER_PRODUCT]);
+}
+
+void InnerProductLayer::forward(cl_mem data) {
+    status     = clSetKernelArg(kernels[K_INNER_PRODUCT], 0, sizeof(cl_mem), &data);
+    checkError(status, "Failed to set arg 0");
+    status    |= clSetKernelArg(kernels[K_INNER_PRODUCT], 1, sizeof(cl_mem), &weight_);
+    checkError(status, "Failed to set arg 1");
+    status    |= clSetKernelArg(kernels[K_INNER_PRODUCT], 2, sizeof(cl_mem), &bias_);
+    checkError(status, "Failed to set arg 2");
+    status    |= clSetKernelArg(kernels[K_INNER_PRODUCT], 3, sizeof(cl_mem), &inner_);
+    checkError(status, "Failed to set arg 3");
+    status    |= clSetKernelArg(kernels[K_INNER_PRODUCT], 4, sizeof(int), &col_);
+    checkError(status, "Failed to set arg");
+    
+    printf("start inner kernel\n");
+    status = clEnqueueNDRangeKernel(queues[K_INNER_PRODUCT], kernels[K_INNER_PRODUCT], 1, NULL, &row_, NULL, 0, NULL, NULL);
+    checkError(status, "Failed to exec");
+    printf("end inner kernel\n");
+    clFinish(queues[K_INNER_PRODUCT]);
+}
+
+void InnerProductLayer::get_mem(int &dn, int &dc, int &dh, int &dw) {
+    dn = 1;
+    dc = row_;
+    dh = 1;
+    dw = 1;
+}
+#endif
+

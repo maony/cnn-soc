@@ -14,6 +14,7 @@ extern cl_kernel kernels[K_NUM_KERNELS];
 extern cl_program program;
 extern cl_int status;
 
+#if defined(IM2COL) && defined(GEMM)
 class ConvLayer {
     public:
         ConvLayer(void);
@@ -32,7 +33,9 @@ class ConvLayer {
     public:
         cl_mem top_;
 };
+#endif
 
+#ifdef PRELU
 class PreluLayer {
     public:
         PreluLayer();
@@ -44,7 +47,9 @@ class PreluLayer {
         size_t g_size_;
         cl_mem slope_;
 };
+#endif
 
+#ifdef MAX_POOLING
 class MaxPoolingLayer {
     public:
         MaxPoolingLayer();
@@ -60,6 +65,23 @@ class MaxPoolingLayer {
         int size_bot_, size_top_;
         size_t size_g_;
 };
+#endif
+
+#ifdef INNER_PRODUCT
+class InnerProductLayer {
+    public:
+        InnerProductLayer();
+        ~InnerProductLayer();
+        InnerProductLayer(int dn, int dc, int dh, int dw, int fn, float *weight, float *bias);
+        void get_mem(int &dn, int &dc, int &dh, int &dw);
+        void forward(cl_mem data);
+        cl_mem inner_;
+    private:
+        int col_;
+        size_t row_;
+        cl_mem weight_, bias_;
+};
+#endif
 
 #endif
 

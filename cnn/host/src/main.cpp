@@ -385,6 +385,8 @@ void ocl_attribute(void) {
     FREE(conv01_bias);
     FREE(conv01_filter);
     conv32.get_mem(dn, dc, dh, dw);
+    int dn1, dc1, dh1, dw1;
+    conv32.get_mem(dn1, dc1, dh1, dw1);
     // prelu32
     INIT_PRELU();
     PreluLayer prelu32(dn, dc, dh, dw, conv01_bias);
@@ -432,6 +434,154 @@ void ocl_attribute(void) {
     INIT_PRELU();
     PreluLayer prelu41(dn, dc, dh, dw, conv01_bias);
     FREE(conv01_bias);
+    // conv41_flattern
+    // conv41_dropout
+#define INIT_INNER() \
+    do { \
+        conv01_filter = (float *)alignedMalloc(sizeof(float) * MUL_4(dn, dc, dh, dw) * fn); \
+        conv01_bias   = (float *)alignedMalloc(sizeof(float) * fn); \
+        load_model_param(fp_model, offset, MUL_4(dn, dc, dh, dw) * fn, conv01_filter); \
+	    offset += MUL_4(dn, dc, dh, dw) * fn; \
+	    load_model_param(fp_model, offset, fn, conv01_bias); \
+	    offset += fn; \
+    }while(0)
+    // local4_data1
+    fn = 128;
+    INIT_INNER();
+    InnerProductLayer local4_data1(dn, dc, dh, dw, fn, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    local4_data1.get_mem(dn, dc, dh, dw);
+    // local4_data1 drop
+    int dn2, dc2, dh2, dw2;
+    local4_data1.get_mem(dn2, dc2, dh2, dw2);
+    
+    // bottom(input prelu32, dn1, dc1, dh1, dw1)
+    // conv33_repeat0
+    fn = 80; fc = dc1; fh = 3; fw = 3;
+    ph = fh / 2; pw = fw / 2; sh = 1;   sw = 1;
+    INIT_CONV();
+    ConvLayer conv33_repeat0(dn1, dc1, dh1, dw1, ph, pw, sh, sw);
+    conv33_repeat0.init_weight(fn, fh, fw, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    conv33_repeat0.get_mem(dn, dc, dh, dw);
+    // prelu33_repeat0
+    INIT_PRELU();
+    PreluLayer prelu33_repeat0(dn, dc, dh, dw, conv01_bias);
+    FREE(conv01_bias);
+    // conv34_repeat0
+    fn = 80; fc = dc; fh = 3; fw = 3;
+    ph = fh / 2; pw = fw / 2; sh = 1;   sw = 1;
+    INIT_CONV();
+    ConvLayer conv34_repeat0(dn, dc, dh, dw, ph, pw, sh, sw);
+    conv34_repeat0.init_weight(fn, fh, fw, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    conv34_repeat0.get_mem(dn, dc, dh, dw);
+    // prelu34_repeat0
+    INIT_PRELU();
+    PreluLayer prelu34_repeat0(dn, dc, dh, dw, conv01_bias);
+    FREE(conv01_bias);
+    // pool3_repeat0
+    MaxPoolingLayer pool3_repeat0(dn, dc, dh, dw, 0, 0, 2, 2, 2, 2);
+    pool3_repeat0.get_mem(dn, dc, dh, dw);
+    
+    // conv41_repeat0
+    fn = 32; fc = dc; fh = 5; fw = 5;
+    ph = fh / 2; pw = fw / 2; sh = 1;   sw = 1;
+    INIT_CONV();
+    ConvLayer conv41_repeat0(dn, dc, dh, dw, ph, pw, sh, sw);
+    conv41_repeat0.init_weight(fn, fh, fw, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    conv41_repeat0.get_mem(dn, dc, dh, dw);
+    // prelu41_repeat0
+    INIT_PRELU();
+    PreluLayer prelu41_repeat0(dn, dc, dh, dw, conv01_bias);
+    FREE(conv01_bias);
+    // conv41_flattern_repeat0
+    // conv41_dropout_repeat0
+    // local4_data1_repeat0
+    fn = 32;
+    INIT_INNER();
+    InnerProductLayer local4_data1_repeat0(dn, dc, dh, dw, fn, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    local4_data1_repeat0.get_mem(dn, dc, dh, dw);
+    // local4_data1_drop_repeat0
+    
+    // bottom(input prelu32, dn1, dc1, dh1, dw1)
+    // conv33_repeat1
+    fn = 80; fc = dc1; fh = 3; fw = 3;
+    ph = fh / 2; pw = fw / 2; sh = 1;   sw = 1;
+    INIT_CONV();
+    ConvLayer conv33_repeat1(dn1, dc1, dh1, dw1, ph, pw, sh, sw);
+    conv33_repeat1.init_weight(fn, fh, fw, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    conv33_repeat1.get_mem(dn, dc, dh, dw);
+    // prelu33_repeat1
+    INIT_PRELU();
+    PreluLayer prelu33_repeat1(dn, dc, dh, dw, conv01_bias);
+    FREE(conv01_bias);
+    // conv34_repeat1
+    fn = 80; fc = dc; fh = 3; fw = 3;
+    ph = fh / 2; pw = fw / 2; sh = 1;   sw = 1;
+    INIT_CONV();
+    ConvLayer conv34_repeat1(dn, dc, dh, dw, ph, pw, sh, sw);
+    conv34_repeat1.init_weight(fn, fh, fw, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    conv34_repeat1.get_mem(dn, dc, dh, dw);
+    // prelu34_repeat1
+    INIT_PRELU();
+    PreluLayer prelu34_repeat1(dn, dc, dh, dw, conv01_bias);
+    FREE(conv01_bias);
+    // pool3_repeat1
+    MaxPoolingLayer pool3_repeat1(dn, dc, dh, dw, 0, 0, 2, 2, 2, 2);
+    pool3_repeat1.get_mem(dn, dc, dh, dw);
+    // conv41_repeat1
+    fn = 32; fc = dc; fh = 5; fw = 5;
+    ph = fh / 2; pw = fw / 2; sh = 1;   sw = 1;
+    INIT_CONV();
+    ConvLayer conv41_repeat1(dn, dc, dh, dw, ph, pw, sh, sw);
+    conv41_repeat1.init_weight(fn, fh, fw, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    conv41_repeat1.get_mem(dn, dc, dh, dw);
+    // prelu41_repeat1
+    INIT_PRELU();
+    PreluLayer prelu41_repeat1(dn, dc, dh, dw, conv01_bias);
+    FREE(conv01_bias);
+    // conv41_flatten_repeat1
+    // conv41_dropout_repeat1
+    // local4_data1_repeat1
+    fn = 32;
+    INIT_INNER();
+    InnerProductLayer local4_data1_repeat1(dn, dc, dh, dw, fn, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    local4_data1_repeat1.get_mem(dn, dc, dh, dw);
+    
+    // loss_layer_gender_1(from local4_data1)
+    fn = 2;
+    dn = dn2; dc = dc2; dh = dh2; dw = dw2;
+    //INIT_INNER();
+    InnerProductLayer loss_layer_gender_1(dn, dc, dh, dw, fn, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    loss_layer_gender_1.get_mem(dn, dc, dh, dw);
+    // loss_layer_age_1(from local4_data1)
+    fn = 100;
+    dn = dn2; dc = dc2; dh = dh2; dw = dw2;
+    INIT_INNER();
+    InnerProductLayer loss_layer_age_1(dn, dc, dh, dw, fn, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    loss_layer_age_1.get_mem(dn, dc, dh, dw);
+    // normalized_output
+    // to be cont.
 
     // -------------------cnn net start----------------------------
     conv01.forward(d_conv01_data);
@@ -473,15 +623,67 @@ void ocl_attribute(void) {
 
     conv41.forward(pool3.pool_);
     prelu41.forward(conv41.top_);
+    // conv41_flattern
+    // conv41_dropout
+    local4_data1.forward(conv41.top_);
+    // local4_data1_drop --top->output(128)
+
+    conv33_repeat0.forward(conv32.top_);
+    prelu33_repeat0.forward(conv33_repeat0.top_);
+    conv34_repeat0.forward(conv33_repeat0.top_);
+    prelu34_repeat0.forward(conv34_repeat0.top_);
+    pool3_repeat0.forward(conv34_repeat0.top_);
+
+    conv41_repeat0.forward(pool3_repeat0.pool_);
+    prelu41_repeat0.forward(conv41_repeat0.top_);
+    // conv41_flattern_repeat0
+    // conv41_dropout_repeat0
+    local4_data1_repeat0.forward(conv41_repeat0.top_);
+    // conv41_data1_drop_repeat0
+
+    conv33_repeat1.forward(conv32.top_);
+    prelu33_repeat1.forward(conv33_repeat1.top_);
+    conv34_repeat1.forward(conv33_repeat1.top_);
+    prelu34_repeat1.forward(conv34_repeat1.top_);
+    pool3_repeat1.forward(conv34_repeat1.top_);
+    conv41_repeat1.forward(pool3_repeat1.pool_);
+    prelu41_repeat1.forward(conv41_repeat1.top_);
+    // conv41_flattern_repeat1
+    // conv41_dropout_repeat1
+    local4_data1_repeat1.forward(conv41_repeat1.top_);
+    // conv41_data1_drop_repeat1 --top->output_repeat1(32)
+    
+    // Concat other
+    cl_mem Concat_other = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * (128 + 32), NULL, &status);
+    checkError(status, "Failed to allocate concat buffer\n");
+    clEnqueueCopyBuffer(queues[K_IM2COL], local4_data1.inner_, Concat_other, 0, 0, sizeof(float) * 128, 0, NULL, NULL);
+    clEnqueueCopyBuffer(queues[K_IM2COL], local4_data1_repeat1.inner_, Concat_other, 0, sizeof(float) * 128, sizeof(float) * 32, 0, NULL, NULL);
+    clFinish(queues[K_IM2COL]);
+   
+    // loss_layer_gender_1
+    //printf("dn2 = %d; dc2=%d; dh2 = %d; dw2=%d\n ", dn2, dc2, dh2, dw2);
+    //printf("dn = %d; dc=%d; dh = %d; dw=%d\n ", dn, dc, dh, dw);
+    loss_layer_gender_1.forward(local4_data1.inner_);
+    //printf("los concat ---end--------\n");
+    loss_layer_age_1.forward(local4_data1.inner_);
+
 
     //cl_mem d_conv01_out;
     //conv01.get_mem(d_conv01_out, dn, dc, dh, dw);
     float *h_out = (float *)alignedMalloc(sizeof(float) * MUL_4(dn, dc, dh, dw));
-    status = clEnqueueReadBuffer(queues[K_IM2COL], conv41.top_, CL_TRUE, 0, sizeof(float) * MUL_4(dn, dc, dh, dw), h_out, 0, NULL, NULL);
+    status = clEnqueueReadBuffer(queues[K_IM2COL], loss_layer_age_1.inner_, CL_TRUE, 0, sizeof(float) * MUL_4(dn, dc, dh, dw), h_out, 0, NULL, NULL);
     clFinish(queues[K_IM2COL]);
     
-    WRITE_BIN(h_out, "prelu41-out-fpga.bin", MUL_4(dn, dc, dh, dw)); 
+    WRITE_BIN(h_out, "loss_layer_gender_1-out-fpga.bin", MUL_4(dn, dc, dh, dw)); 
     
+    // write concate layer------
+    float *h_concat = (float *)alignedMalloc(sizeof(float) * (128+32));
+    status = clEnqueueReadBuffer(queues[K_IM2COL], Concat_other, CL_TRUE, 0, sizeof(float) * (128+32), h_concat, 0, NULL, NULL);
+    clFinish(queues[K_IM2COL]);
+    WRITE_BIN(h_concat, "Concat_other-out-fpga.bin", 160); 
+    // -------------------------------------
+
+    if(Concat_other)    clReleaseMemObject(Concat_other);
     if(conv01_data)     alignedFree(conv01_data);
     if(h_out)           alignedFree(h_out);
     if(conv01_filter)   alignedFree(conv01_filter);

@@ -7,7 +7,7 @@
 #define CONV
 #define PRELU
 #define MAX_POOLING
-//#define INNER_PRODUCT
+#define INNER_PRODUCT
 //#define RELU
 //#define SOFTMAX
 //#define BIAS

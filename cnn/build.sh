@@ -36,7 +36,7 @@ then
     # aoc -v --fp-relaxed --fpc --board de1soc_sharedonly device/cnn_define.cl -o bin/max_pooling.aocx --report --profile
     # aoc -v --fp-relaxed --fpc --board de1soc_sharedonly device/cnn_define.cl -o bin/relu.aocx --report --profile
     # aoc -v --fp-relaxed --fpc --board de1soc_sharedonly device/cnn_define.cl -o bin/softmax.aocx --report --profile
-    aoc -v --fp-relaxed --fpc --util 95 -O3 --board de1soc_sharedonly device/cnn_define.cl -o bin/conv_opt.aocx --report --profile
+    aoc -v --fp-relaxed --fpc --board de1soc_sharedonly device/cnn_define.cl -o bin/cnn2inner.aocx --report
     # aoc -v --fp-relaxed --fpc --board de1soc_sharedonly device/cnn_define.cl -o bin/inner_product.aocx --report --profile
     # aoc -v --fp-relaxed --fpc --board de1soc_sharedonly device/cnn_define.cl -o bin/conv.aocx --report
     # aoc -v --sw-dimm-partition --fp-relaxed --util 95 -O3 --board de1soc_sharedonly matrix_mult.cl -o bin/matrix_mult_8x8_default.aocx --report
@@ -64,7 +64,7 @@ then
     # cp bin/matrix_mult_simd.aocx ./matrix_mult.aocx
     # cp bin/matrix_mult_16x8.aocx ./matrix_mult.aocx
     # cp bin/im2col_1x1.aocx ./cnn.aocx
-    cp bin/conv.aocx ./cnn.aocx
+    cp bin/cnn2inner.aocx ./cnn.aocx
     echo "-------------------------------------------------------------------"
     echo "----------scp transfer---------------"
     echo "-------------------------------------------------------------------"

@@ -5,8 +5,8 @@
 #define GEMM
 #define PRELU
 #define MAX_POOLING
+#define INNER_PRODUCT
 //#define RELU
-//#define INNER_PRODUCT
 //#define SOFTMAX
 //#define BIAS
 
