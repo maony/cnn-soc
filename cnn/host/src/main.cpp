@@ -45,12 +45,14 @@
 #include "ref_cnn.hpp"
 #include "layer.hpp"
 #include "common.hpp"
+#include "postprocessing.hpp"
 
 // ACL runtime configuration
 cl_platform_id platform = NULL;
 cl_device_id device = NULL;
 cl_context context = NULL;
-cl_command_queue queues[K_NUM_KERNELS];
+//cl_command_queue queues[K_NUM_KERNELS];
+cl_command_queue queues[2];
 cl_kernel kernels[K_NUM_KERNELS];
 cl_program program = NULL;
 cl_int status = 0;
@@ -80,7 +82,8 @@ bool approximatelyEqual(float a, float b, float epsilon);
 bool im2col_test();
 void lenet_test(int sel);
 void attribute_test(void);
-void ocl_attribute(void);
+void ocl_attribute(char *pfile);
+void mem_test(void);
 
 #ifdef MAX_POOLING
 void ocl_pooling_max_layer(const blob_shape_t src, const conv_param_t param, const int kernel_h, const int kernel_w, blob_shape_t dst);
@@ -156,7 +159,14 @@ int main(int argc, char **argv) {
     //ref_lenet();
     //lenet_test(5);
     //attribute_test();
-    ocl_attribute();
+    cl_ulong max_alloc, global_size;
+    clGetDeviceInfo(device, CL_DEVICE_MAX_MEM_ALLOC_SIZE, sizeof(cl_ulong), &max_alloc, NULL);
+    clGetDeviceInfo(device, CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(cl_ulong), &global_size, NULL);
+    printf("max alloc is %lu, global size is %lu\n", max_alloc, global_size);
+    printf("CL_DEVICE_MAX_MEM_ALLOC_SIZE is %lu\n", max_alloc);
+    printf("CL_DEVICE_GLOBAL_MEM_SIZE is %lu\n", global_size);
+    //mem_test();
+    ocl_attribute(argv[1]);
 
     printf("--------------------------------------\n");
     printf("-----------test complete!-------------\n");
@@ -166,11 +176,28 @@ int main(int argc, char **argv) {
     return 0;
 }
 
-void ocl_attribute(void) {
+void mem_test( void ) {
     int offset = 0;
     FILE        *fp_data, *fp_model;
     fp_data     = fopen("conv01-in.bin", "rb");
     fp_model    = fopen("attribute-model.bin", "rb");
+    
+#define MUL_4(a, b, c, d) a * b * c * d
+    int dn = 1, dc = 3, dh = 256, dw = 256;
+    int fn = 16, fc = 3, fh = 7, fw = 7;
+    int ph = fh / 2, pw = fw / 2;
+    int sh = 2, sw = 2;
+
+#undef MUL_4
+}
+
+void ocl_attribute(char *pfile) {
+    int offset = 0;
+    FILE        *fp_data, *fp_model;
+    printf("file sel: %s\n", pfile);
+    fp_data     = fopen(pfile, "rb");
+    //fp_model    = fopen("attribute-model.bin", "rb");
+    fp_model    = fopen("model_attribute20160201.bin", "rb");
     
 #define MUL_4(a, b, c, d) a * b * c * d
     int dn = 1, dc = 3, dh = 256, dw = 256;
@@ -185,6 +212,7 @@ void ocl_attribute(void) {
     status = clEnqueueWriteBuffer(queues[K_IM2COL], d_conv01_data, CL_TRUE, 0, sizeof(float) * MUL_4(dn, dc, dh, dw), conv01_data, 0, NULL, NULL);
     checkError(status, "Failed to copy data to device");
     clFinish(queues[K_IM2COL]);
+    printf("buffer size: %10d\n", sizeof(float) * MUL_4(dn, dc, dh, dw));
    
 #define FREE(x) \
     do {        \
@@ -509,6 +537,8 @@ void ocl_attribute(void) {
     FREE(conv01_bias);
     FREE(conv01_filter);
     local4_data1_repeat0.get_mem(dn, dc, dh, dw);
+    int dn3, dc3, dh3, dw3;
+    local4_data1_repeat0.get_mem(dn3, dc3, dh3, dw3);
     // local4_data1_drop_repeat0
     
     // bottom(input prelu32, dn1, dc1, dh1, dw1)
@@ -563,30 +593,16 @@ void ocl_attribute(void) {
     FREE(conv01_bias);
     FREE(conv01_filter);
     local4_data1_repeat1.get_mem(dn, dc, dh, dw);
+    //local4_data1_repeat1.release_mem();
     
-    // loss_layer_gender_1(from local4_data1)
-    fn = 2;
-    dn = dn2; dc = dc2; dh = dh2; dw = dw2;
-    //INIT_INNER();
-    InnerProductLayer loss_layer_gender_1(dn, dc, dh, dw, fn, conv01_filter, conv01_bias);
-    FREE(conv01_bias);
-    FREE(conv01_filter);
-    loss_layer_gender_1.get_mem(dn, dc, dh, dw);
-    // loss_layer_age_1(from local4_data1)
-    fn = 100;
-    dn = dn2; dc = dc2; dh = dh2; dw = dw2;
-    INIT_INNER();
-    InnerProductLayer loss_layer_age_1(dn, dc, dh, dw, fn, conv01_filter, conv01_bias);
-    FREE(conv01_bias);
-    FREE(conv01_filter);
-    loss_layer_age_1.get_mem(dn, dc, dh, dw);
-    // normalized_output
-    // to be cont.
-
     // -------------------cnn net start----------------------------
+    double time_all = getCurrentTimestamp();
+    
     conv01.forward(d_conv01_data);
+    clReleaseMemObject(d_conv01_data);
     prelu01.forward(conv01.top_);
     pool0.forward(conv01.top_);
+    clReleaseMemObject(conv01.top_);
     conv11.forward(pool0.pool_);
     prelu11.forward(conv11.top_);
     conv12.forward(conv11.top_);
@@ -652,38 +668,405 @@ void ocl_attribute(void) {
     // conv41_dropout_repeat1
     local4_data1_repeat1.forward(conv41_repeat1.top_);
     // conv41_data1_drop_repeat1 --top->output_repeat1(32)
+  
+    // ---------beauty
+    // conv33_repeat2
+    fn = 80; fc = dc1; fh = 3; fw = 3;
+    ph = fh / 2; pw = fw / 2; sh = 1;   sw = 1;
+    INIT_CONV();
+    ConvLayer conv33_repeat2(dn1, dc1, dh1, dw1, ph, pw, sh, sw);
+    conv33_repeat2.init_weight(fn, fh, fw, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    conv33_repeat2.get_mem(dn, dc, dh, dw);
+    conv33_repeat2.forward(conv32.top_);
+    // prelu33_repeat2
+    INIT_PRELU();
+    PreluLayer prelu33_repeat2(dn, dc, dh, dw, conv01_bias);
+    FREE(conv01_bias);
+    prelu33_repeat2.forward(conv33_repeat2.top_);
+    // conv34_repeat2
+    fn = 80; fc = dc; fh = 3; fw = 3;
+    ph = fh / 2; pw = fw / 2; sh = 1;   sw = 1;
+    INIT_CONV();
+    ConvLayer conv34_repeat2(dn, dc, dh, dw, ph, pw, sh, sw);
+    conv34_repeat2.init_weight(fn, fh, fw, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    conv34_repeat2.get_mem(dn, dc, dh, dw);
+    conv34_repeat2.forward(conv33_repeat2.top_);
+    // prelu34_repeat2
+    INIT_PRELU();
+    PreluLayer prelu34_repeat2(dn, dc, dh, dw, conv01_bias);
+    FREE(conv01_bias);
+    prelu34_repeat2.forward(conv34_repeat2.top_);
+    // pool3_repeat2
+    MaxPoolingLayer pool3_repeat2(dn, dc, dh, dw, 0, 0, 2, 2, 2, 2);
+    pool3_repeat2.get_mem(dn, dc, dh, dw);
+    pool3_repeat2.forward(conv34_repeat2.top_);
+    // conv41_repeat2
+    fn = 32; fc = dc; fh = 5; fw = 5;
+    ph = fh / 2; pw = fw / 2; sh = 1;   sw = 1;
+    INIT_CONV();
+    ConvLayer conv41_repeat2(dn, dc, dh, dw, ph, pw, sh, sw);
+    conv41_repeat2.init_weight(fn, fh, fw, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    conv41_repeat2.get_mem(dn, dc, dh, dw);
+    conv41_repeat2.forward(pool3_repeat2.pool_);
+    // prelu41_repeat2
+    INIT_PRELU();
+    PreluLayer prelu41_repeat2(dn, dc, dh, dw, conv01_bias);
+    FREE(conv01_bias);
+    prelu41_repeat2.forward(conv41_repeat2.top_);
+    // conv41_flatten_repeat2
+    // conv41_dropout_repeat2
+    // local4_data1_repeat2
+    fn = 32;
+    INIT_INNER();
+    InnerProductLayer local4_data1_repeat2(dn, dc, dh, dw, fn, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    local4_data1_repeat2.get_mem(dn, dc, dh, dw);
+    local4_data1_repeat2.forward(conv41_repeat2.top_);
+    //local4_data1_repeat2.release_mem();
+    // conv41_data1_drop_repeat2 --top->output_repeat2(32)
     
+    cl_event event_concat[5];
+    cl_ulong s_ctime, e_ctime;
+    cl_mem Concat_beauty = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * (128 + 32), NULL, &status);
+    checkError(status, "Failed to allocate concat buffer\n");
+    clEnqueueCopyBuffer(queues[K_IM2COL], local4_data1.inner_, Concat_beauty, 0, 0, sizeof(float) * 128, 0, NULL, &event_concat[0]);
+    clEnqueueCopyBuffer(queues[K_IM2COL], local4_data1_repeat2.inner_, Concat_beauty, 0, sizeof(float) * 128, sizeof(float) * 32, 0, NULL, &event_concat[1]);
+    clWaitForEvents(2, event_concat);
+    clFinish(queues[K_IM2COL]);
+    
+    // -------------------cnn net start----------------------------
+   // double time_all = getCurrentTimestamp();
+    // --------
+
+    // time cost
+    double t_conv = 0.0, t_prelu = 0.0, t_pool = 0.0, t_inner = 0.0, t_sigmoid = 0.0, t_concat = 0.0;
+#define PT(a, b) //printf("%s\t\t\t\t: %12.5lf\n", a, b)
+    
+    printf("\n\n-------------------------------\n");
+    printf("layers time cost:(ms)\n");
+
+    t_conv += conv01.c_time;
+    PT("conv01", conv01.c_time);
+    t_prelu += prelu01.c_time;
+    PT("prelu01", prelu01.c_time);
+    t_pool += pool0.c_time;
+    PT("pool0", pool0.c_time);
+    t_conv += conv11.c_time;
+    PT("conv11", conv11.c_time);
+    t_prelu += prelu11.c_time;
+    PT("prelu11", prelu11.c_time);
+    t_conv += conv12.c_time;
+    PT("conv12", conv12.c_time);
+    t_prelu += prelu12.c_time;
+    PT("prelu12", prelu12.c_time);
+    t_conv += conv13.c_time;
+    PT("conv13", conv13.c_time);
+    t_prelu += prelu13.c_time;
+    PT("prelu13", prelu13.c_time);
+    t_conv += conv14.c_time;
+    PT("conv14", conv14.c_time);
+    t_prelu += prelu14.c_time;
+    PT("prelu14", prelu14.c_time);
+    t_pool += pool1.c_time;
+    PT("pool1", pool1.c_time);
+
+    t_conv += conv21.c_time;
+    PT("conv21", conv21.c_time);
+    t_prelu += prelu21.c_time;
+    PT("prelu21", prelu21.c_time);
+    t_conv += conv22.c_time;
+    PT("conv22", conv22.c_time);
+    t_prelu += prelu22.c_time;
+    PT("prelu22", prelu22.c_time);
+    t_conv += conv23.c_time;
+    PT("conv23", conv23.c_time);
+    t_prelu += prelu23.c_time;
+    PT("prelu23", prelu23.c_time);
+    t_conv += conv24.c_time;
+    PT("conv24", conv24.c_time);
+    t_prelu += prelu24.c_time;
+    PT("prelu24", prelu24.c_time);
+    t_conv += conv25.c_time;
+    PT("conv25", conv25.c_time);
+    t_prelu += prelu25.c_time;
+    PT("prelu25", prelu25.c_time);
+    t_conv += conv26.c_time;
+    PT("conv26", conv26.c_time);
+    t_prelu += prelu26.c_time;
+    PT("prelu26", prelu26.c_time);
+    t_pool += pool2.c_time;
+    PT("pool2", pool2.c_time);
+
+    t_conv += conv31.c_time;
+    PT("conv31", conv31.c_time);
+    t_prelu += prelu31.c_time;
+    PT("prelu31", prelu31.c_time);
+    t_conv += conv32.c_time;
+    PT("conv32", conv32.c_time);
+    t_prelu += prelu32.c_time;
+    PT("prelu32", prelu32.c_time);
+    t_conv += conv33.c_time;
+    PT("conv33", conv33.c_time);
+    t_prelu += prelu33.c_time;
+    PT("prelu33", prelu33.c_time);
+    t_conv += conv34.c_time;
+    PT("conv34", conv34.c_time);
+    t_prelu += prelu34.c_time;
+    PT("prelu34", prelu34.c_time);
+    t_pool += pool3.c_time;
+    PT("pool3", pool3.c_time);
+
+    t_conv += conv41.c_time;
+    PT("conv41", conv41.c_time);
+    t_prelu += prelu41.c_time;
+    PT("prelu41", prelu41.c_time);
+    t_inner += local4_data1.c_time;
+    PT("local4_data1", local4_data1.c_time);
+
+    t_conv += conv33_repeat0.c_time;
+    PT("conv33_repeat0", conv33_repeat0.c_time);
+    t_prelu += prelu33_repeat0.c_time;
+    PT("prelu33_repeat0", prelu33_repeat0.c_time);
+    t_conv += conv34_repeat0.c_time;
+    PT("conv34_repeat0", conv34_repeat0.c_time);
+    t_prelu += prelu34_repeat0.c_time;
+    PT("prelu34_repeat0", prelu34_repeat0.c_time);
+    t_pool += pool3_repeat0.c_time;
+    PT("pool3_repeat0", pool3_repeat0.c_time);
+
+    t_conv += conv41_repeat0.c_time;
+    PT("conv41_repeat0", conv41_repeat0.c_time);
+    t_prelu += prelu41_repeat0.c_time;
+    PT("prelu41_repeat0", prelu41_repeat0.c_time);
+    t_inner += local4_data1_repeat0.c_time;
+    PT("local4_data1_repeat0", local4_data1_repeat0.c_time);
+
+    t_conv += conv33_repeat1.c_time;
+    PT("conv33_repeat1", conv33_repeat1.c_time);
+    t_prelu += prelu33_repeat1.c_time;
+    PT("prelu33_repeat1", prelu33_repeat1.c_time);
+    t_conv += conv34_repeat1.c_time;
+    PT("conv34_repeat1", conv34_repeat1.c_time);
+    t_prelu += prelu34_repeat1.c_time;
+    PT("prelu34_repeat1", prelu34_repeat1.c_time);
+    t_pool += pool3_repeat1.c_time;
+    PT("pool3_repeat1", pool3_repeat1.c_time);
+
+    t_conv += conv41_repeat1.c_time;
+    PT("conv41_repeat1", conv41_repeat1.c_time);
+    t_prelu += prelu41_repeat1.c_time;
+    PT("prelu41_repeat1", prelu41_repeat1.c_time);
+    t_inner += local4_data1_repeat1.c_time;
+    PT("local4_data1_repeat1", local4_data1_repeat1.c_time);
+
+    t_conv += conv33_repeat2.c_time;
+    PT("conv33_repeat2", conv33_repeat2.c_time);
+    t_prelu += prelu33_repeat2.c_time;
+    PT("prelu33_repeat2", prelu33_repeat2.c_time);
+    t_conv += conv34_repeat2.c_time;
+    PT("conv34_repeat2", conv34_repeat2.c_time);
+    t_prelu += prelu34_repeat2.c_time;
+    PT("prelu34_repeat2", prelu34_repeat2.c_time);
+    t_pool += pool3_repeat2.c_time;
+    PT("pool3_repeat2", pool3_repeat2.c_time);
+
+    t_conv += conv41_repeat2.c_time;
+    PT("conv41_repeat2", conv41_repeat2.c_time);
+    t_prelu += prelu41_repeat2.c_time;
+    PT("prelu41_repeat2", prelu41_repeat2.c_time);
+    t_inner += local4_data1_repeat2.c_time;
+    PT("local4_data1_repeat2", local4_data1_repeat2.c_time);
+
+
     // Concat other
     cl_mem Concat_other = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * (128 + 32), NULL, &status);
     checkError(status, "Failed to allocate concat buffer\n");
-    clEnqueueCopyBuffer(queues[K_IM2COL], local4_data1.inner_, Concat_other, 0, 0, sizeof(float) * 128, 0, NULL, NULL);
-    clEnqueueCopyBuffer(queues[K_IM2COL], local4_data1_repeat1.inner_, Concat_other, 0, sizeof(float) * 128, sizeof(float) * 32, 0, NULL, NULL);
+    clEnqueueCopyBuffer(queues[K_IM2COL], local4_data1.inner_, Concat_other, 0, 0, sizeof(float) * 128, 0, NULL, &event_concat[0]);
+    clEnqueueCopyBuffer(queues[K_IM2COL], local4_data1_repeat1.inner_, Concat_other, 0, sizeof(float) * 128, sizeof(float) * 32, 0, NULL, &event_concat[1]);
+    clWaitForEvents(2, event_concat);
     clFinish(queues[K_IM2COL]);
-   
-    // loss_layer_gender_1
-    //printf("dn2 = %d; dc2=%d; dh2 = %d; dw2=%d\n ", dn2, dc2, dh2, dw2);
-    //printf("dn = %d; dc=%d; dh = %d; dw=%d\n ", dn, dc, dh, dw);
+
+    status = clGetEventProfilingInfo(event_concat[0], CL_PROFILING_COMMAND_QUEUED, sizeof(s_ctime), &s_ctime, NULL);
+    status = clGetEventProfilingInfo(event_concat[0], CL_PROFILING_COMMAND_QUEUED, sizeof(e_ctime), &e_ctime, NULL);
+    t_concat += (double)(e_ctime - s_ctime) * 1e-6;
+    status = clGetEventProfilingInfo(event_concat[1], CL_PROFILING_COMMAND_QUEUED, sizeof(s_ctime), &s_ctime, NULL);
+    status = clGetEventProfilingInfo(event_concat[1], CL_PROFILING_COMMAND_QUEUED, sizeof(e_ctime), &e_ctime, NULL);
+    t_concat += (double)(e_ctime - s_ctime) * 1e-6;
+
+    // loss_layer_gender_1(from local4_data1)
+    fn = 2;
+    dn = dn2; dc = dc2; dh = dh2; dw = dw2;
+    INIT_INNER();
+    InnerProductLayer loss_layer_gender_1(dn, dc, dh, dw, fn, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    loss_layer_gender_1.get_mem(dn, dc, dh, dw);
     loss_layer_gender_1.forward(local4_data1.inner_);
-    //printf("los concat ---end--------\n");
+
+    t_inner += loss_layer_gender_1.c_time;
+    PT("loss_layer_gender_1", loss_layer_gender_1.c_time);
+
+    // loss_layer_age_1(from local4_data1)
+    fn = 100;
+    dn = dn2; dc = dc2; dh = dh2; dw = dw2;
+    INIT_INNER();
+    InnerProductLayer loss_layer_age_1(dn, dc, dh, dw, fn, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    loss_layer_age_1.get_mem(dn, dc, dh, dw);
     loss_layer_age_1.forward(local4_data1.inner_);
-
-
-    //cl_mem d_conv01_out;
-    //conv01.get_mem(d_conv01_out, dn, dc, dh, dw);
-    float *h_out = (float *)alignedMalloc(sizeof(float) * MUL_4(dn, dc, dh, dw));
-    status = clEnqueueReadBuffer(queues[K_IM2COL], loss_layer_age_1.inner_, CL_TRUE, 0, sizeof(float) * MUL_4(dn, dc, dh, dw), h_out, 0, NULL, NULL);
-    clFinish(queues[K_IM2COL]);
     
-    WRITE_BIN(h_out, "loss_layer_gender_1-out-fpga.bin", MUL_4(dn, dc, dh, dw)); 
+    t_inner += loss_layer_age_1.c_time;
+    PT("loss_layer_age_1", loss_layer_age_1.c_time);
+    
+    // normalized_output
+    SigmoidLayer normalized_output(dn, dc, dh, dw);
+    normalized_output.forward(loss_layer_age_1.inner_);
+    
+    t_sigmoid += normalized_output.c_time;
+    PT("normalized_output", normalized_output.c_time);
+
+    // loss_layer_expression_2(from local4_data1_repeat0.inner_)
+    fn = 10;
+    dn = dn3; dc = dc3; dh = dh3; dw = dw3;
+    INIT_INNER();
+    InnerProductLayer loss_layer_expression_2(dn, dc, dh, dw, fn, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    loss_layer_expression_2.get_mem(dn, dc, dh, dw);
+    loss_layer_expression_2.forward(local4_data1_repeat0.inner_);
+
+    t_inner += loss_layer_expression_2.c_time;
+    PT("loss_layer_expression_2", loss_layer_expression_2.c_time);
+
+    // loss_layer_glasses_3(from Concat_other)
+    fn = 3;
+    dn = 1; dc = 160; dh = 1; dw = 1;
+    INIT_INNER();
+    InnerProductLayer loss_layer_glasses_3(dn, dc, dh, dw, fn, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    loss_layer_glasses_3.get_mem(dn, dc, dh, dw);
+    loss_layer_glasses_3.forward(Concat_other);
+
+    t_inner += loss_layer_glasses_3.c_time;
+    PT("loss_layer_glasses_3", loss_layer_glasses_3.c_time);
+
+    // loss_layer_mask_3(from Concat_other)
+    fn = 2;
+    dn = 1; dc = 160; dh = 1; dw = 1;
+    INIT_INNER();
+    InnerProductLayer loss_layer_mask_3(dn, dc, dh, dw, fn, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    loss_layer_mask_3.get_mem(dn, dc, dh, dw);
+    loss_layer_mask_3.forward(Concat_other);
+
+    t_inner += loss_layer_mask_3.c_time;
+    PT("loss_layer_mask_3", loss_layer_mask_3.c_time);
+    
+    // loss_layer_beauty_code(from Concat_beauty)
+    fn = 10;
+    dn = 1; dc = 160; dh = 1; dw = 1;
+    INIT_INNER();
+    InnerProductLayer loss_layer_beauty_code(dn, dc, dh, dw, fn, conv01_filter, conv01_bias);
+    FREE(conv01_bias);
+    FREE(conv01_filter);
+    loss_layer_beauty_code.get_mem(dn, dc, dh, dw);
+    loss_layer_beauty_code.forward(Concat_beauty);
+
+    t_inner += loss_layer_beauty_code.c_time;
+    PT("loss_layer_beauty_code", loss_layer_beauty_code.c_time);
+    
+    // normalized_output
+    SigmoidLayer normalized_beauty(dn, dc, dh, dw);
+    normalized_beauty.forward(loss_layer_beauty_code.inner_);
+    
+    t_sigmoid += normalized_beauty.c_time;
+    PT("normalized_beauty", normalized_beauty.c_time);
+
+    // output
+    // loss_layer_gender_1(2)+normalized_output(100)+loss_layer_expression_2(10)
+    // +loss_layer_glasses_3(3)+loss_layer_mask_3(2)
+    cl_mem output = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * (2+100+10+3+2+10), NULL, &status);
+    checkError(status, "Failed to allocate concat buffer\n");
+    clEnqueueCopyBuffer(queues[K_IM2COL], loss_layer_gender_1.inner_, output, 0, 0, sizeof(float) * 2, 0, NULL, &event_concat[0]);
+    clEnqueueCopyBuffer(queues[K_IM2COL], loss_layer_age_1.inner_, output, 0, sizeof(float) * 2, sizeof(float) * 100, 0, NULL, &event_concat[1]);
+    clEnqueueCopyBuffer(queues[K_IM2COL], loss_layer_expression_2.inner_, output, 0, sizeof(float) * 102, sizeof(float) * 10, 0, NULL, &event_concat[2]);
+    clEnqueueCopyBuffer(queues[K_IM2COL], loss_layer_glasses_3.inner_, output, 0, sizeof(float) * 112, sizeof(float) * 3, 0, NULL, &event_concat[3]);
+    clEnqueueCopyBuffer(queues[K_IM2COL], loss_layer_mask_3.inner_, output, 0, sizeof(float) * 115, sizeof(float) * 2, 0, NULL, &event_concat[4]);
+    clEnqueueCopyBuffer(queues[K_IM2COL], loss_layer_beauty_code.inner_, output, 0, sizeof(float) * 117, sizeof(float) * 10, 0, NULL, NULL);
+    //clFinish(queues[K_IM2COL]);
+
+    clWaitForEvents(5, event_concat);
+    clFinish(queues[K_IM2COL]);
+    time_all = getCurrentTimestamp() - time_all;
+
+    status = clGetEventProfilingInfo(event_concat[0], CL_PROFILING_COMMAND_QUEUED, sizeof(s_ctime), &s_ctime, NULL);
+    status = clGetEventProfilingInfo(event_concat[0], CL_PROFILING_COMMAND_QUEUED, sizeof(e_ctime), &e_ctime, NULL);
+    t_concat += (double)(e_ctime - s_ctime) * 1e-6;
+    status = clGetEventProfilingInfo(event_concat[1], CL_PROFILING_COMMAND_QUEUED, sizeof(s_ctime), &s_ctime, NULL);
+    status = clGetEventProfilingInfo(event_concat[1], CL_PROFILING_COMMAND_QUEUED, sizeof(e_ctime), &e_ctime, NULL);
+    t_concat += (double)(e_ctime - s_ctime) * 1e-6;
+    status = clGetEventProfilingInfo(event_concat[2], CL_PROFILING_COMMAND_QUEUED, sizeof(s_ctime), &s_ctime, NULL);
+    status = clGetEventProfilingInfo(event_concat[2], CL_PROFILING_COMMAND_QUEUED, sizeof(e_ctime), &e_ctime, NULL);
+    t_concat += (double)(e_ctime - s_ctime) * 1e-6;
+    status = clGetEventProfilingInfo(event_concat[3], CL_PROFILING_COMMAND_QUEUED, sizeof(s_ctime), &s_ctime, NULL);
+    status = clGetEventProfilingInfo(event_concat[3], CL_PROFILING_COMMAND_QUEUED, sizeof(e_ctime), &e_ctime, NULL);
+    t_concat += (double)(e_ctime - s_ctime) * 1e-6;
+    status = clGetEventProfilingInfo(event_concat[4], CL_PROFILING_COMMAND_QUEUED, sizeof(s_ctime), &s_ctime, NULL);
+    status = clGetEventProfilingInfo(event_concat[4], CL_PROFILING_COMMAND_QUEUED, sizeof(e_ctime), &e_ctime, NULL);
+    t_concat += (double)(e_ctime - s_ctime) * 1e-6;
+    
+    printf("----------------------------\n");
+    printf("time cost list(unit:ms)\n");
+    printf("convolution:\t\t%9.3lf\n", t_conv);
+    printf("prelu      :\t\t%9.3lf\n", t_prelu);
+    printf("pool       :\t\t%9.3lf\n", t_pool);
+    printf("inner(FC)  :\t\t%9.3lf\n", t_inner);
+    printf("sigmoid    :\t\t%9.3lf\n", t_sigmoid);
+    printf("concat     :\t\t%9.3lf\n", t_concat);
+    printf("all        :\t\t%9.3lf\n", time_all);
+    printf("----------------------------\n");
+    
+    //cl_mem d_conv01_out;
+    float *h_out = (float *)alignedMalloc(sizeof(float) * MUL_4(dn, dc, dh, dw));
+    //status = clEnqueueReadBuffer(queues[K_IM2COL], loss_layer_mask_3.inner_, CL_TRUE, 0, sizeof(float) * MUL_4(dn, dc, dh, dw), h_out, 0, NULL, NULL);
+    //clFinish(queues[K_IM2COL]);
+    //
+    //WRITE_BIN(h_out, "loss_layer_mask_3-out-fpga.bin", MUL_4(dn, dc, dh, dw)); 
     
     // write concate layer------
-    float *h_concat = (float *)alignedMalloc(sizeof(float) * (128+32));
-    status = clEnqueueReadBuffer(queues[K_IM2COL], Concat_other, CL_TRUE, 0, sizeof(float) * (128+32), h_concat, 0, NULL, NULL);
+    float *h_concat = (float *)alignedMalloc(sizeof(float) * (127));
+    status = clEnqueueReadBuffer(queues[K_IM2COL], output, CL_TRUE, 0, sizeof(float) * (127), h_concat, 0, NULL, NULL);
     clFinish(queues[K_IM2COL]);
-    WRITE_BIN(h_concat, "Concat_other-out-fpga.bin", 160); 
+    WRITE_BIN(h_concat, "output-out-fpga.bin", 127); 
     // -------------------------------------
+    
+    // -----------------------------------------result display
+    Result r;
+    vec2output(h_concat, r);
+    
+    printf("------------------------------------\n");
+    printf("detect result--------\n");
+    printf("gender      :%d\n", r.gender);
+    printf("age         :%5.3f\n", r.age);
+    printf("emotion     :%d\n", r.emotion);
+    printf("glasses     :%d\n", r.glasses);
+    printf("mask        :%d\n", r.mask);
+    printf("beauty      :%5.3f\n", r.beauty);
+    // -----------------------------------------
 
     if(Concat_other)    clReleaseMemObject(Concat_other);
+    if(output)          clReleaseMemObject(output);
+    if(h_concat)        alignedFree(h_concat);
     if(conv01_data)     alignedFree(conv01_data);
     if(h_out)           alignedFree(h_out);
     if(conv01_filter)   alignedFree(conv01_filter);
@@ -1346,7 +1729,8 @@ bool init() {
     checkError(status, "Failed to create context");
 
     // Create the command queues
-    for(int i=0; i<K_NUM_KERNELS; ++i) {
+    //for(int i=0; i<K_NUM_KERNELS; ++i) {
+    for(int i=0; i<2; ++i) {
         queues[i] = clCreateCommandQueue(context, device, CL_QUEUE_PROFILING_ENABLE, &status);
         checkError(status, "Failed to create command queue (%d)", i);
     }

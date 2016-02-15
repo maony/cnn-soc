@@ -6,6 +6,7 @@
 #define PRELU
 #define MAX_POOLING
 #define INNER_PRODUCT
+#define SIGMOID
 //#define RELU
 //#define SOFTMAX
 //#define BIAS
@@ -35,6 +36,9 @@ enum KERNELS {
 #endif
 #ifdef SOFTMAX
     K_SOFTMAX,
+#endif
+#ifdef SIGMOID
+    K_SIGMOID,
 #endif
     K_NUM_KERNELS
 };
@@ -66,6 +70,9 @@ static const char* kernel_names[K_NUM_KERNELS+1] =
 #endif
 #ifdef SOFTMAX
     "softmax",
+#endif
+#ifdef SIGMOID
+    "sigmoid",
 #endif
     "null"
 };

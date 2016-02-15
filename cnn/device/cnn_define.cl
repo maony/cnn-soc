@@ -4,10 +4,12 @@
 
 
 */
-#define CONV
-#define PRELU
-#define MAX_POOLING
-#define INNER_PRODUCT
+//#define CONV
+//#define PRELU
+//#define MAX_POOLING
+//#define INNER_PRODUCT
+#define SIGMOID
+
 //#define RELU
 //#define SOFTMAX
 //#define BIAS
@@ -36,6 +38,11 @@
 #ifdef INNER_PRODUCT
 #define BS_INNER_PRODUCT 1
 #include "inner_product.cl"
+#endif
+
+#ifdef SIGMOID
+#define BS_SIGMOID 1
+#include "sigmoid.cl"
 #endif
 
 #ifdef RELU

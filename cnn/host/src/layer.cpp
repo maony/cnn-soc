@@ -38,10 +38,17 @@ void ConvLayer::init_weight(int fn, int fh, int fw, float *weight, float *bias) 
 
     weight_  = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * M * K, NULL, &status);
     checkError(status, "Failed to allocate col buffer\n");
+
+//    printf("buffer size: %10d\n", sizeof(float) * M * K);
+    
     status = clEnqueueWriteBuffer(queues[K_GEMM], weight_, CL_TRUE, 0, sizeof(float) * M * K, weight, 0, NULL, NULL);
     checkError(status, "Failed to copy data to device");
+    
     bias_    = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * c_top_, NULL, &status);
     checkError(status, "Failed to allocate bias buffer\n");
+    
+//    printf("buffer size: %10d\n", sizeof(float) * c_top_);
+    
     status = clEnqueueWriteBuffer(queues[K_GEMM], bias_, CL_TRUE, 0, sizeof(float) * c_top_, bias, 0, NULL, NULL);
     checkError(status, "Failed to copy data to device");
     clFinish(queues[K_GEMM]);
@@ -57,8 +64,12 @@ void ConvLayer::init_weight(int fn, int fh, int fw, float *weight, float *bias) 
     col_     = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * c_bot_ * h_top_ * w_top_ * fh_ * fw_, NULL, &status);
     checkError(status, "Failed to allocate col buffer\n");
     
+//  printf("buffer size: %10d\n", sizeof(float) * c_bot_ * h_top_ * w_top_ * fh_ * fw_);
+    
     top_     = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * M * N, NULL, &status);
     checkError(status, "Failed to allocate col buffer\n");
+    
+//    printf("buffer size: %10d\n", sizeof(float) * M * N);
 }
 
 void ConvLayer::forward(cl_mem bot) {
@@ -86,8 +97,12 @@ void ConvLayer::forward(cl_mem bot) {
     checkError(status, "Failed to set im2col arg 10");
     
     size_t channel_ext = c_bot_ * fh_ * fw_;
-    status = clEnqueueNDRangeKernel(queues[K_IM2COL], kernels[K_IM2COL], 1, NULL, &channel_ext, NULL, 0, NULL, NULL);
-    
+    //status = clEnqueueNDRangeKernel(queues[K_IM2COL], kernels[K_IM2COL], 1, NULL, &channel_ext, NULL, 0, NULL, NULL);
+    status = clEnqueueNDRangeKernel(queues[K_IM2COL], kernels[K_IM2COL], 1, NULL, &channel_ext, NULL, 0, NULL, &event_conv);
+    clWaitForEvents(1, &event_conv); 
+    status = clGetEventProfilingInfo(event_conv, CL_PROFILING_COMMAND_QUEUED, sizeof(s_time), &s_time, NULL);
+    status = clGetEventProfilingInfo(event_conv, CL_PROFILING_COMMAND_END, sizeof(e_time), &e_time, NULL);
+    c_time = (double)(e_time - s_time) * 1e-6;
     //float *h_out = (float *)alignedMalloc(sizeof(float) * n_top_ * c_top_ * h_top_ * w_top_);
     //status = clEnqueueReadBuffer(queues[K_IM2COL], col_, CL_TRUE, 0, sizeof(float) * n_top_ * c_top_ * h_top_ * w_top_, h_out, 0, NULL, NULL);
     //clFinish(queues[K_IM2COL]);
@@ -96,7 +111,7 @@ void ConvLayer::forward(cl_mem bot) {
     int M = fn_, K = fc_ * fh_ * fw_, N = h_top_ * w_top_;
     size_t wg_size[2]   = {1, 1};
     size_t g_size[2]    = {N, M};
-    clFinish(queues[K_IM2COL]);
+    //clFinish(queues[K_IM2COL]);
     
     status     = clSetKernelArg(kernels[K_GEMM], 0, sizeof(cl_mem), &top_);
     status    |= clSetKernelArg(kernels[K_GEMM], 1, sizeof(cl_mem), &weight_);
@@ -105,8 +120,13 @@ void ConvLayer::forward(cl_mem bot) {
     status    |= clSetKernelArg(kernels[K_GEMM], 4, sizeof(int), &K);
     status    |= clSetKernelArg(kernels[K_GEMM], 5, sizeof(int), &N);
     status    |= clSetKernelArg(kernels[K_GEMM], 6, sizeof(cl_mem), &bias_);
-    status = clEnqueueNDRangeKernel(queues[K_GEMM], kernels[K_GEMM], 2, NULL, g_size, wg_size, 0, NULL, NULL);
-    clFinish(queues[K_GEMM]);
+    status = clEnqueueNDRangeKernel(queues[K_GEMM], kernels[K_GEMM], 2, NULL, g_size, wg_size, 0, NULL, &event_conv);
+    //status = clEnqueueNDRangeKernel(queues[K_GEMM], kernels[K_GEMM], 2, NULL, g_size, wg_size, 0, NULL, NULL);
+    //clFinish(queues[K_GEMM]);
+    clWaitForEvents(1, &event_conv); 
+    status = clGetEventProfilingInfo(event_conv, CL_PROFILING_COMMAND_QUEUED, sizeof(s_time), &s_time, NULL);
+    status = clGetEventProfilingInfo(event_conv, CL_PROFILING_COMMAND_END, sizeof(e_time), &e_time, NULL);
+    c_time += (double)(e_time - s_time) * 1e-6;
     
     //status     = clSetKernelArg(kernels[K_BIAS], 0, sizeof(cl_mem), &top_);
     //status    |= clSetKernelArg(kernels[K_BIAS], 1, sizeof(cl_mem), &bias_);
@@ -119,6 +139,9 @@ void ConvLayer::forward(cl_mem bot) {
     //status = clEnqueueReadBuffer(queues[K_IM2COL], col_, CL_TRUE, 0, sizeof(float) * n_top_ * c_top_ * h_top_ * w_top_, h_out, 0, NULL, NULL);
     //clFinish(queues[K_IM2COL]);
     //printf(" data is %e %e\n", *h_out, *(h_out+1));
+    clReleaseMemObject(weight_);    
+    clReleaseMemObject(bias_);
+    clReleaseMemObject(col_);    
 }
 
 void ConvLayer::get_mem(int &n, int &c, int &h, int &w) {
@@ -145,7 +168,11 @@ PreluLayer::PreluLayer(int dn, int dc, int dh, int dw, float* slope) {
 
     slope_  = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * c_, NULL, &status);
     checkError(status, "Failed to allocate col buffer\n");
-    status = clEnqueueWriteBuffer(queues[K_PRELU], slope_, CL_TRUE, 0, sizeof(float) * c_, slope, 0, NULL, NULL);
+    
+//    printf("buffer size: %10d\n", sizeof(float) * c_);
+    
+    //status = clEnqueueWriteBuffer(queues[K_PRELU], slope_, CL_TRUE, 0, sizeof(float) * c_, slope, 0, NULL, NULL);
+    status = clEnqueueWriteBuffer(queues[K_GEMM], slope_, CL_TRUE, 0, sizeof(float) * c_, slope, 0, NULL, NULL);
     checkError(status, "Failed to copy data to device");
     clFinish(queues[K_PRELU]);
 }
@@ -155,8 +182,16 @@ void PreluLayer::forward(cl_mem &data) {
     status    |= clSetKernelArg(kernels[K_PRELU], 1, sizeof(cl_mem), &slope_);
     status    |= clSetKernelArg(kernels[K_PRELU], 2, sizeof(int), &size_);
     
-    status = clEnqueueNDRangeKernel(queues[K_PRELU], kernels[K_PRELU], 1, NULL, &g_size_, NULL, 0, NULL, NULL);
-    clFinish(queues[K_PRELU]);
+    //status = clEnqueueNDRangeKernel(queues[K_GEMM], kernels[K_PRELU], 1, NULL, &g_size_, NULL, 0, NULL, NULL);
+    //clFinish(queues[K_GEMM]);
+    
+    status = clEnqueueNDRangeKernel(queues[K_GEMM], kernels[K_PRELU], 1, NULL, &g_size_, NULL, 0, NULL, &event_prelu);
+    clWaitForEvents(1, &event_prelu); 
+    status = clGetEventProfilingInfo(event_prelu, CL_PROFILING_COMMAND_QUEUED, sizeof(s_time), &s_time, NULL);
+    status = clGetEventProfilingInfo(event_prelu, CL_PROFILING_COMMAND_END, sizeof(e_time), &e_time, NULL);
+    c_time = (double)(e_time - s_time) * 1e-6;
+    
+    clReleaseMemObject(slope_);
 }
 #endif
 
@@ -178,6 +213,7 @@ MaxPoolingLayer::MaxPoolingLayer(int dn, int dc, int dh, int dw, int ph, int pw,
 
     pool_  = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * n_top_ * c_top_ * size_top_, NULL, &status);
     checkError(status, "Failed to allocate pool buffer\n");
+//    printf("buffer size: %10d\n", sizeof(float) * n_top_ * c_top_ * size_top_);
 }
 
 void MaxPoolingLayer::get_mem(int &n, int &c, int &h, int &w) {
@@ -199,8 +235,13 @@ void MaxPoolingLayer::forward(cl_mem data) {
     status    |= clSetKernelArg(kernels[K_MAX_POOLING], 8, sizeof(int), &kh_);
     status    |= clSetKernelArg(kernels[K_MAX_POOLING], 9, sizeof(int), &ph_);
     
-    status = clEnqueueNDRangeKernel(queues[K_MAX_POOLING], kernels[K_MAX_POOLING], 1, NULL, &size_g_, NULL, 0, NULL, NULL);
-    clFinish(queues[K_MAX_POOLING]);
+    status = clEnqueueNDRangeKernel(queues[K_GEMM], kernels[K_MAX_POOLING], 1, NULL, &size_g_, NULL, 0, NULL, &event_maxpooling);
+    //status = clEnqueueNDRangeKernel(queues[K_GEMM], kernels[K_MAX_POOLING], 1, NULL, &size_g_, NULL, 0, NULL, NULL);
+    //clFinish(queues[K_GEMM]);
+    clWaitForEvents(1, &event_maxpooling); 
+    status = clGetEventProfilingInfo(event_maxpooling, CL_PROFILING_COMMAND_QUEUED, sizeof(s_time), &s_time, NULL);
+    status = clGetEventProfilingInfo(event_maxpooling, CL_PROFILING_COMMAND_END, sizeof(e_time), &e_time, NULL);
+    c_time = (double)(e_time - s_time) * 1e-6;
 }
 #endif
 
@@ -211,25 +252,74 @@ InnerProductLayer::~InnerProductLayer() {
     if(weight_)     clReleaseMemObject(weight_);
     if(bias_)       clReleaseMemObject(bias_);
 }
-InnerProductLayer::InnerProductLayer(int dn, int dc, int dh, int dw, int fn, float *weight, float *bias) {
+
+void InnerProductLayer::release_mem(void) {
+    status = clReleaseMemObject(bias_);
+    clReleaseMemObject(weight_);
+    clReleaseMemObject(inner_);
+
+}
+
+InnerProductLayer::InnerProductLayer(int flag, int dn, int dc, int dh, int dw, int fn, float *weight, float *bias) {
     row_ = fn;
     col_ = dn * dc * dh * dw;
     printf("row %d, col %d\n", row_, col_);
 
     inner_  = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * row_, NULL, &status);
     checkError(status, "Failed to allocate inner buffer\n");
+    
+//    printf("buffer size: %10d\n", sizeof(float) * row_);
+    
     //if(status != CL_SUCCESS) printf("create inner error\n");
     weight_ = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * row_ * col_, NULL, &status);
+    //printf("memory status is %d\n", status);
+    
+//    printf("buffer size: %10d\n", sizeof(float) * row_ * col_);
+    
     checkError(status, "Failed to allocate inner buffer\n");
     bias_   = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * row_, NULL, &status);
+    
+//    printf("buffer size: %10d\n", sizeof(float) * row_);
+    
+    //printf("memory status is %d\n", status);
+//    checkError(status, "Failed to allocate inner buffer\n");
+//   cl_uint ref = -3;
+//    status = clGetMemObjectInfo(bias_, CL_MEM_REFERENCE_COUNT, sizeof(cl_uint), &ref, NULL);
+    //printf("ref cont is %d before\n", ref);
+//    ref = -5;
+//    checkError(status, "Failed to allocate inner buffer\n");
+//    status = clGetMemObjectInfo(bias_, CL_MEM_REFERENCE_COUNT, sizeof(cl_uint), &ref, NULL);
+    //printf("ref cont is %d after\n", ref);
+    //status = clEnqueueWriteBuffer(queues[K_GEMM], weight_, CL_TRUE, 0, sizeof(float) * row_ * col_, weight, 0, NULL, NULL);
+    //checkError(status, "Failed to copy data to device");
+    //clFinish(queues[K_GEMM]);
+    //status = clEnqueueWriteBuffer(queues[K_GEMM], bias_, CL_TRUE, 0, sizeof(float) * row_, bias, 0, NULL, NULL);
+    //checkError(status, "Failed to copy data to device");
+    //clFinish(queues[K_GEMM]);
+}
+
+InnerProductLayer::InnerProductLayer(int dn, int dc, int dh, int dw, int fn, float *weight, float *bias) {
+    row_ = fn;
+    col_ = dn * dc * dh * dw;
+    //printf("row %d, col %d\n", row_, col_);
+
+    inner_  = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * row_, NULL, &status);
+//    printf("buffer size: %10d\n", sizeof(float) * row_);
+    checkError(status, "Failed to allocate inner buffer\n");
+    //if(status != CL_SUCCESS) printf("create inner error\n");
+    weight_ = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * row_ * col_, NULL, &status);
+//    printf("buffer size: %10d\n", sizeof(float) * row_ * col_);
+    checkError(status, "Failed to allocate inner buffer\n");
+    bias_   = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * row_, NULL, &status);
+//    printf("buffer size: %10d\n", sizeof(float) * row_);
     checkError(status, "Failed to allocate inner buffer\n");
     
-    status = clEnqueueWriteBuffer(queues[K_PRELU], weight_, CL_TRUE, 0, sizeof(float) * row_ * col_, weight, 0, NULL, NULL);
+    status = clEnqueueWriteBuffer(queues[K_GEMM], weight_, CL_TRUE, 0, sizeof(float) * row_ * col_, weight, 0, NULL, NULL);
     checkError(status, "Failed to copy data to device");
-    clFinish(queues[K_PRELU]);
-    status = clEnqueueWriteBuffer(queues[K_INNER_PRODUCT], bias_, CL_TRUE, 0, sizeof(float) * row_, bias, 0, NULL, NULL);
+    clFinish(queues[K_GEMM]);
+    status = clEnqueueWriteBuffer(queues[K_GEMM], bias_, CL_TRUE, 0, sizeof(float) * row_, bias, 0, NULL, NULL);
     checkError(status, "Failed to copy data to device");
-    clFinish(queues[K_INNER_PRODUCT]);
+    clFinish(queues[K_GEMM]);
 }
 
 void InnerProductLayer::forward(cl_mem data) {
@@ -244,11 +334,38 @@ void InnerProductLayer::forward(cl_mem data) {
     status    |= clSetKernelArg(kernels[K_INNER_PRODUCT], 4, sizeof(int), &col_);
     checkError(status, "Failed to set arg");
     
-    printf("start inner kernel\n");
-    status = clEnqueueNDRangeKernel(queues[K_INNER_PRODUCT], kernels[K_INNER_PRODUCT], 1, NULL, &row_, NULL, 0, NULL, NULL);
-    checkError(status, "Failed to exec");
-    printf("end inner kernel\n");
-    clFinish(queues[K_INNER_PRODUCT]);
+    //printf("start inner kernel\n");
+    status = clFlush(queues[K_GEMM]);
+    if(CL_SUCCESS != status) printf("error flush gemm");
+    status = clFlush(queues[K_IM2COL]);
+    if(CL_SUCCESS != status) printf("error flush im2col");
+    
+    //status = clEnqueueNDRangeKernel(queues[K_GEMM], kernels[K_INNER_PRODUCT], 1, NULL, &row_, NULL, 0, NULL, NULL);
+    //checkError(status, "Failed to exec");
+    ////printf("end inner kernel\n");
+    //clFinish(queues[K_GEMM]);
+    
+    status = clEnqueueNDRangeKernel(queues[K_GEMM], kernels[K_INNER_PRODUCT], 1, NULL, &row_, NULL, 0, NULL, &event_innerproduct);
+    clWaitForEvents(1, &event_innerproduct);
+    status = clGetEventProfilingInfo(event_innerproduct, CL_PROFILING_COMMAND_QUEUED, sizeof(s_time), &s_time, NULL);
+    status = clGetEventProfilingInfo(event_innerproduct, CL_PROFILING_COMMAND_END, sizeof(e_time), &e_time, NULL);
+    c_time = (double)(e_time - s_time) * 1e-6;
+    
+    
+    //if(weight_)     {
+        //cl_uint ref = -3;
+        //status = clGetMemObjectInfo(weight_, CL_MEM_REFERENCE_COUNT, sizeof(cl_uint), &ref, NULL);
+        //printf("ref cont is %d before\n", ref);
+        status = clReleaseMemObject(weight_);
+        checkError(status, "Failed to release memory");
+    //    status = clReleaseMemObject(weight_);
+    //    checkError(status, "Failed to release memory 2");
+        //ref = -4;
+        //status = clGetMemObjectInfo(weight_, CL_MEM_REFERENCE_COUNT, sizeof(cl_uint), &ref, NULL);
+        //printf("ref cont is %d after\n", ref);
+    //}
+    //if(bias_)       
+    clReleaseMemObject(bias_);
 }
 
 void InnerProductLayer::get_mem(int &dn, int &dc, int &dh, int &dw) {
@@ -259,3 +376,26 @@ void InnerProductLayer::get_mem(int &dn, int &dc, int &dh, int &dw) {
 }
 #endif
 
+#ifdef SIGMOID
+SigmoidLayer::SigmoidLayer() {}
+SigmoidLayer::~SigmoidLayer() {}
+SigmoidLayer::SigmoidLayer(int dn, int dc, int dh, int dw) {
+    col_ = dn * dc * dh * dw;
+}
+
+void SigmoidLayer::forward(cl_mem &data) {
+    status     = clSetKernelArg(kernels[K_SIGMOID], 0, sizeof(cl_mem), &data);
+    checkError(status, "Failed to set arg 0");
+    
+    status = clEnqueueNDRangeKernel(queues[K_GEMM], kernels[K_SIGMOID], 1, NULL, &col_, NULL, 0, NULL, &event_sigmoid);
+    //status = clEnqueueNDRangeKernel(queues[K_GEMM], kernels[K_SIGMOID], 1, NULL, &col_, NULL, 0, NULL, NULL);
+    //checkError(status, "Failed to exec");
+    //clFinish(queues[K_GEMM]);
+    
+    clWaitForEvents(1, &event_sigmoid);
+    status = clGetEventProfilingInfo(event_sigmoid, CL_PROFILING_COMMAND_QUEUED, sizeof(s_time), &s_time, NULL);
+    status = clGetEventProfilingInfo(event_sigmoid, CL_PROFILING_COMMAND_END, sizeof(e_time), &e_time, NULL);
+    c_time = (double)(e_time - s_time) * 1e-6;
+    
+}
+#endif
