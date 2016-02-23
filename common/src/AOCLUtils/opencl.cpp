@@ -488,7 +488,7 @@ double getCurrentTimestamp() {
   timespec a;
   clock_gettime(CLOCK_MONOTONIC, &a);
   //return (double(a.tv_nsec) * 1.0e-9) + double(a.tv_sec);
-  return (double(a.tv_nsec)) + double(a.tv_sec * 1.0e9);
+  return (double(a.tv_nsec) * 1e-6) + double(a.tv_sec * 1.0e3);
 #endif
 }
 

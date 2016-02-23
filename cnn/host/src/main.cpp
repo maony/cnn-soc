@@ -47,6 +47,11 @@
 #include "common.hpp"
 #include "postprocessing.hpp"
 
+
+#include <algorithm>
+#include <string>
+#include <vector>
+
 // ACL runtime configuration
 cl_platform_id platform = NULL;
 cl_device_id device = NULL;
