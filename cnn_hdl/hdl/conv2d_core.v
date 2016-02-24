@@ -34,9 +34,8 @@ localparam D_R0_W   = (D_MUL+D_ADD) << 1 + (D_MUL + D_ADD) << 0 + 2;
 localparam D_R1_W   = (D_MUL+D_ADD) << 2 + (D_MUL + D_ADD) << 1 + 4 - KS;
 localparam D_R2_W   = (D_MUL+D_ADD) << 3 + (D_MUL + D_ADD) << 1 + 6 - KS << 1;
 
-reg                         run;
-reg          [C_COUNT-1:0] dly_write[3];
-reg          [C_COUNT-1:0] dly_read[2];
+reg           [C_COUNT-1:0] dly_write[3];
+reg           [C_COUNT-1:0] dly_read[2];
 
 reg          [KS*KS*32-1:0] weight;
 reg           [C_WIDTH-1:0] width;
@@ -46,27 +45,29 @@ wire         [KS*KS*32-1:0] result_mul;
 wire         [KS*KS*32-1:0] result_add;
 reg          [KS*KS*32-1:0] result_dly;
 
-genvar                      g_mul;
+genvar                      g;
+
+reg                         run;
+reg           [C_COUNT-1:0] dly_cnt;
 
 wire                  [2:0] wreq_row;
-reg           [C_COUNT-1:0] wdly_cnt[3];
+reg                   [2:0] wreq_run;
 reg          [C_LENGTH-1:0] wreq_cnt[3];
-
 wire             [2*32-1:0] data_row;
 wire                  [1:0] rreq_row;
-reg           [C_COUNT-1:0] rdly_cnt[2];
+reg                   [1:0] rreq_run;
 reg          [C_LENGTH-1:0] rreq_cnt[2];
 
 always @ ( posedge clk or posedge rst )
-    if( pxl_ena_in )
-        run <= 1;
+    if( rst )
+        run <= 1'b0;
+    else if( pxl_ena_in )
+        run <= 1'b1;
     else if( pxl_ena_out )
-        run <= 0;
+        run <= 1'b0;
 
 always @ ( posedge clk or posedge rst )
-    if( rst )
-        width  <= 9'd1;
-    else if( param_ena ) begin
+    if( param_ena ) begin
         weight <= param_weight;
         width  <= param_width;
         length <= param_length;
@@ -106,20 +107,20 @@ always @ ( posedge clk ) begin
     result_dly[3*32-1:2*32] <= result_add[2*32-1:1*32];
 end
 
-always @ ( posedge clk ) begin
-    if( pxl_ena_in || (wreq_cnt[0] == length) )
-        wdly_cnt[0] <= {C_COUNT{1'b1}};
-    else if( run && (wdly_cnt[0] == dly_write[0]) )
-        wdly_cnt[0] <= wdly_cnt[0];
-    else if( run )
-        wdly_cnt[0] <= wdly_cnt[0] + 'd1;
-end
 always @ ( posedge clk )
     if( pxl_ena_in )
-        wreq_cnt[0] <= {C_LENGTH{1'b1}};
+        wreq_cnt[0] <= {{(C_LENGTH-1){1'b0}}, 1'b1};
     else if( wreq_row[0] )
         wreq_cnt[0] <= wreq_cnt[0] + 'd1;
-assign wreq_row[0] = ( wdly_cnt[0] == dly_write[0] );
+assign wreq_row[0] = wreq_run[0];
+always @ ( posedge clk or posedge rst ) begin
+    if( pxl_ena_in || rst )
+        wreq_run[0] <= 1'b0;
+    else if( wreq_cnt[0] == length )
+        wreq_run[0] <= 1'b0;
+    else if( dly_cnt == dly_write[0] )
+        wreq_run[0] <= 1'b1;
+end
 
 scfifo	SCFF0 (
     .aclr           ( rst ),
@@ -150,20 +151,20 @@ defparam
 	scfifo_component.underflow_checking = "ON",
 	scfifo_component.use_eab = "ON";
 
-always @ ( posedge clk ) begin
-    if( pxl_ena_in || (rreq_cnt[0] == length) )
-        rdly_cnt[0] <= {C_COUNT{1'b1}};
-    else if( rdly_cnt[0] == dly_read[0] )
-        rdly_cnt[0] <= rdly_cnt[0];
-    else if( run )
-        rdly_cnt[0] <= rdly_cnt[0] + 'd1;
+always @ ( posedge clk or posedge rst ) begin
+    if( pxl_ena_in || rst )
+        rreq_run[0] <= 1'b0;
+    else if( rreq_cnt[0] == length )
+        rreq_run[0] <= 1'b0;
+    else if( dly_cnt == dly_read[0] )
+        rreq_run[0] <= 1'b1;
 end
 always @ ( posedge clk )
     if( pxl_ena_in )
-        rreq_cnt[0] <= {C_LENGTH{1'b1}};
+        rreq_cnt[0] <= {{(C_LENGTH-1){1'b0}}, 1'b1};
     else if( rreq_row[0] )
         rreq_cnt[0] <= rreq_cnt[0] + 'd1;
-assign rreq_row[0] = ( rdly_cnt[0] == dly_read[0] );
+assign rreq_row[0] = rreq_run[0];
 
 always @ ( posedge clk ) begin
     result_dly[4*32-1:3*32] <= data_row[31:0];
@@ -171,20 +172,20 @@ always @ ( posedge clk ) begin
     result_dly[6*32-1:5*32] <= result_add[5*32-1:4*32];
 end
 
-always @ ( posedge clk ) begin
-    if( pxl_ena_in || (wreq_cnt[1] == length) )
-        wdly_cnt[1] <= {C_COUNT{1'b1}};
-    else if( wdly_cnt[1] == dly_write[1] )
-        wdly_cnt[1] <= wdly_cnt[1];
-    else if( run )
-        wdly_cnt[1] <= wdly_cnt[1] + 'd1;
-end
 always @ ( posedge clk )
     if( pxl_ena_in )
-        wreq_cnt[1] <= {C_LENGTH{1'b1}};
-    else if( wreq_row[0] )
+        wreq_cnt[1] <= {{(C_LENGTH-1){1'b0}}, 1'b1};
+    else if( wreq_row[1] )
         wreq_cnt[1] <= wreq_cnt[1] + 'd1;
-assign wreq_row[1] = ( wdly_cnt[1] == dly_write[1] );
+assign wreq_row[1] = wreq_run[1];
+always @ ( posedge clk or posedge rst ) begin
+    if( pxl_ena_in || rst )
+        wreq_run[1] <= 1'b0;
+    else if( wreq_cnt[1] == length )
+        wreq_run[1] <= 1'b0;
+    else if( dly_cnt == dly_write[1] )
+        wreq_run[1] <= 1'b1;
+end
 
 scfifo	SCFF1 (
     .aclr           ( rst ),
@@ -215,37 +216,48 @@ defparam
 	scfifo_component.underflow_checking = "ON",
 	scfifo_component.use_eab = "ON";
 
-always @ ( posedge clk ) begin
-    if( pxl_ena_in || (rreq_cnt[1] == length) )
-        rdly_cnt[1] <= {C_COUNT{1'b1}};
-    else if( rdly_cnt[0] == dly_read[1] )
-        rdly_cnt[1] <= rdly_cnt[1];
-    else if( run )
-        rdly_cnt[1] <= rdly_cnt[1] + 'd1;
+always @ ( posedge clk or posedge rst ) begin
+    if( pxl_ena_in || rst )
+        rreq_run[1] <= 1'b0;
+    else if( rreq_cnt[1] == length )
+        rreq_run[1] <= 1'b0;
+    else if( dly_cnt == dly_read[1] )
+        rreq_run[1] <= 1'b1;
 end
 always @ ( posedge clk )
     if( pxl_ena_in )
-        rreq_cnt[1] <= {C_LENGTH{1'b1}};
-    else if( rreq_row[0] )
+        rreq_cnt[1] <= {{(C_LENGTH-1){1'b0}}, 1'b1};
+    else if( rreq_row[1] )
         rreq_cnt[1] <= rreq_cnt[1] + 'd1;
-assign rreq_row[1] = ( rdly_cnt[1] == dly_read[1] );
+assign rreq_row[1] = rreq_run[1];
 
 always @ ( posedge clk ) begin
-    if( pxl_ena_in || (wreq_cnt[2] == length) )
-        wdly_cnt[2] <= {C_COUNT{1'b1}};
-    else if( wdly_cnt[2] == dly_write[2] )
-        wdly_cnt[2] <= wdly_cnt[2];
-    else if( run )
-        wdly_cnt[2] <= wdly_cnt[2] + 'd1;
+    result_dly[7*32-1:6*32] <= data_row[63:32];
+    result_dly[8*32-1:7*32] <= result_add[7*32-1:6*32];
+    result_dly[9*32-1:8*32] <= result_add[8*32-1:7*32];
 end
+
 always @ ( posedge clk )
     if( pxl_ena_in )
-        wreq_cnt[2] <= {C_LENGTH{1'b1}};
-    else if( wreq_row[0] )
+        wreq_cnt[2] <= {{(C_LENGTH-1){1'b0}}, 1'b1};
+    else if( wreq_row[2] )
         wreq_cnt[2] <= wreq_cnt[2] + 'd1;
-assign wreq_row[2] = ( wdly_cnt[2] == dly_write[2] );
-
+assign wreq_row[2] = wreq_run[2];
+always @ ( posedge clk or posedge rst )
+    if( pxl_ena_in || rst )
+        wreq_run[2] <= 1'b0;
+    else if( wreq_cnt[2] == length )
+        wreq_run[2] <= 1'b0;
+    else if( dly_cnt == dly_write[2] )
+        wreq_run[2] <= 1'b1;
 assign pxl_ena_out = wreq_row[2];
+
+always @ ( posedge clk or rst )
+    if( rst || pxl_ena_in )
+        dly_cnt <= {C_COUNT{1'b1}};
+    else if( run )
+        dly_cnt <= dly_cnt + 'd1;
+
 fp_add FP_ADDZ      (
     .clock          ( clk ),
     .dataa          ( result_add[KS*KS*32-1:(KS*KS-1)*32] ),
