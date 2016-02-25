@@ -33,8 +33,7 @@ localparam C_COUNT  = 15;
 localparam D_PPL    = D_MUL5 + D_ADD * 3 + 1 * 2;
 
 reg         [D_PPL+D_ADD:0] dly_ena_x[0:KS-1];
-wire                  [0:0] run;
-reg                [KS-1:0] dly_pxl_ena;
+reg                [KS-1:1] dly_pxl_ena;
 reg           [C_COUNT-1:0] dly_cnt;
 reg                  [31:0] pxl_x_reg;
 
@@ -52,8 +51,6 @@ wire                 [31:0] datab_add[0:KS*KS-1];
 
 genvar                      g;
 
-always @ ( posedge clk )
-    dly_pxl_ena[0] <= pxl_ena_x;
 always @ ( posedge clk or rst)
     if( param_ena || rst )
         dly_pxl_ena[1] <= 1'b0;
@@ -65,12 +62,10 @@ always @ ( posedge clk or rst)
     else if(dly_cnt == ({5'd0, width_in, 1'b0}))
         dly_pxl_ena[2] <= 1'b1;
 
-assign run[0] = (~dly_pxl_ena[0]) && pxl_ena_x;
-
 // delay count
 always @ ( posedge clk or rst )
-    if( rst || run[0] )
-        dly_cnt <= {{(C_COUNT-2){1'b0}}, 2'b10};
+    if( rst || param_ena )
+        dly_cnt <= {{(C_COUNT-2){1'b0}}, 2'b01};
     else if( pxl_ena_x )
         dly_cnt <= dly_cnt + 'd1;
 
@@ -182,18 +177,13 @@ generate
         assign datab_add[g*KS+0] = result_mul[g*KS];
         assign datab_add[g*KS+1] = dly_mul0[g];
         assign datab_add[g*KS+2] = dly_mul1[(g+1)*(D_ADD+1)-1];
+        
+        always @ ( posedge clk ) begin
+            dly_mul0[g*1] <= result_mul[g*KS+1];
+            dly_mul1[g*8] <= result_mul[g*KS+2];
+        end
     end
 endgenerate
-
-always @ ( posedge clk ) begin
-    dly_mul0[0]  <= result_mul[1];
-    dly_mul0[1]  <= result_mul[4];
-    dly_mul0[2]  <= result_mul[7];
-
-    dly_mul1[0]  <= result_mul[2];
-    dly_mul1[8]  <= result_mul[5];
-    dly_mul1[16] <= result_mul[8];
-end
 
 assign dataa_add[0] = 32'd0;
 
