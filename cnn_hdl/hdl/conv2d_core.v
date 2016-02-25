@@ -196,21 +196,6 @@ always @ ( posedge clk ) begin
 end
 
 assign dataa_add[0] = 32'd0;
-//assign dataa_add[1] = result_add_dly[0];
-//assign dataa_add[2] = result_add_dly[1];
-//assign dataa_add[4] = result_add_dly[2];
-//assign dataa_add[5] = result_add_dly[3];
-//assign dataa_add[7] = result_add_dly[4];
-//assign dataa_add[8] = result_add_dly[5];
-//assign datab_add[0] = result_mul[0];
-//assign datab_add[3] = result_mul[3];
-//assign datab_add[6] = result_mul[6];
-//assign datab_add[1] = dly_mul0[0];
-//assign datab_add[2] = dly_mul1[7];
-//assign datab_add[4] = dly_mul0[1];
-//assign datab_add[5] = dly_mul1[15];
-//assign datab_add[7] = dly_mul0[2];
-//assign datab_add[8] = dly_mul1[23];
 
 assign pxl_ena_y = dly_ena_x[2][D_PPL-1];
 assign pxl_ena_z = dly_ena_x[2][D_PPL+D_ADD];
