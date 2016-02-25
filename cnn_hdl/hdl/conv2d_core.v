@@ -17,7 +17,8 @@ module conv2d_core #(
 )(
     input                   param_ena,
     input    [KS*KS*32-1:0] param_weight,
-    input     [C_WIDTH-1:0] param_width,
+    input     [C_WIDTH-1:0] param_width_in,
+    input     [C_WIDTH-1:0] param_width_out,
     input    [C_LENGTH-1:0] param_length,
 
     input                   pxl_ena_x,
@@ -37,7 +38,8 @@ reg           [C_COUNT-1:0] dly_write[0:2];
 reg           [C_COUNT-1:0] dly_read[0:2];
 
 reg          [KS*KS*32-1:0] weight_reg;
-reg           [C_WIDTH-1:0] width;
+reg           [C_WIDTH-1:0] width_in;
+reg           [C_WIDTH-1:0] width_out;
 reg          [C_LENGTH-1:0] length;
 
 wire                 [31:0] weight[0:KS*KS-1];
@@ -59,14 +61,16 @@ wire                  [1:0] rreq_row;
 reg                   [2:0] rreq_run;
 reg          [C_LENGTH-1:0] rreq_cnt[0:1];
 
+reg           [C_WIDTH-1:0] out_cnt;
+
 always @ ( posedge clk )
     if( pxl_ena_x ) begin
         dly_write[0] <= D_MUL5 + D_ADD*3;
-        dly_write[1] <= (D_MUL5 + D_ADD*3)*2 + width - KS;
-        dly_write[2] <= (D_MUL5 + D_ADD*3)*3 + (width - KS)*2 + D_ADD;
-        dly_read[0]  <= D_MUL5 + D_ADD*3 + width - KS;
-        dly_read[1]  <= (D_MUL5 + D_ADD*3)*2 + (width - KS)*2;
-        dly_read[2]  <= (D_MUL5 + D_ADD*3)*3 + (width - KS)*2 - 1;
+        dly_write[1] <= width_in + D_MUL5 + D_ADD*3;
+        dly_write[2] <= (width_in << 1) + D_MUL5 + D_ADD*3 + D_ADD;
+        dly_read[0]  <= width_in + D_ADD - 3;
+        dly_read[1]  <= (width_in << 1) + D_ADD - 3;
+        dly_read[2]  <= (width_in << 1) + D_MUL5 + D_ADD*3;
     end
 
 always @ ( posedge clk or posedge rst )
@@ -80,13 +84,14 @@ always @ ( posedge clk or posedge rst )
 always @ ( posedge clk or posedge rst )
     if( param_ena ) begin
         weight_reg  <= param_weight;
-        width  <= param_width;
-        length <= param_length;
+        width_in    <= param_width_in;
+        width_out   <= param_width_out;
+        length      <= param_length;
     end
 
 generate
     for( g = 0; g < KS*KS; g = g + 1) begin:WADD
-        weight[g] = weight_reg[(g+1)*32-1:g*32];
+        assign weight[g] = weight_reg[(g+1)*32-1:g*32];
 
         fp_add7 FP_ADD      (
             .clock          ( clk ),
@@ -97,19 +102,19 @@ generate
     end
 
     for( g = 0; g < KS; g = g + 1 ) begin:MUL
-        fp_mult5 FP_MUL0    (
+        fp_mul5 FP_MUL0     (
             .clock          ( clk ),
             .dataa          ( weight[KS*g+0] ),
             .datab          ( pxl_x ),
             .result         ( result_mul[KS*g+0] )
         );
-        fp_mult11 FP_MUL1   (
+        fp_mul11 FP_MUL1    (
             .clock          ( clk ),
             .dataa          ( weight[KS*g+1] ),
             .datab          ( pxl_x ),
             .result         ( result_mul[KS*g+1] )
         );
-        fp_mult11 FP_MUL2   (
+        fp_mul11 FP_MUL2    (
             .clock          ( clk ),
             .dataa          ( weight[KS*g+2] ),
             .datab          ( pxl_x ),
@@ -118,9 +123,11 @@ generate
     end
     
     for( g = 0; g < 5; g = g + 1) begin:DLY
-        dly_mul[g+01] <= dly_mul[g+00];
-        dly_mul[g+07] <= dly_mul[g+06];
-        dly_mul[g+13] <= dly_mul[g+12];
+        always @ ( posedge clk ) begin
+            dly_mul[g+01] <= dly_mul[g+00];
+            dly_mul[g+07] <= dly_mul[g+06];
+            dly_mul[g+13] <= dly_mul[g+12];
+        end
     end
 endgenerate
 
@@ -279,22 +286,49 @@ always @ ( posedge clk or posedge rst )
         wreq_run[2] <= 1'b1;
 assign pxl_ena_z = wreq_row[2];
 
+//always @ ( posedge clk or posedge rst )
+//    if( rst )
+//        rreq_run[2] <= 1'b0;
+//    else if( dly_cnt == dly_read[2] )
+//        rreq_run[2] <= 1'b1;
+//    else
+//        rreq_run[2] <= 1'b0;
 always @ ( posedge clk or posedge rst )
-    if( rst )
+    if( pxl_ena_x || rst )
+        rreq_run[2] <= 1'b0;
+    else if( rreq_cnt[2] == length )
         rreq_run[2] <= 1'b0;
     else if( dly_cnt == dly_read[2] )
         rreq_run[2] <= 1'b1;
-    else
-        rreq_run[2] <= 1'b0;
-assign pxl_ena_y = rreq_run[2];        
-        
+always @ ( posedge clk )
+    if( pxl_ena_x )
+        rreq_cnt[2] <= {{(C_LENGTH-1){1'b0}}, 1'b1};
+    else if( pxl_ena_y )
+        rreq_cnt[2] <= rreq_cnt[2] + 'd1;
+assign pxl_ena_y = rreq_run[2] && (!(out_cnt == width_out));   
+
+// border process, cross row
+always @ ( posedge clk )
+    if( pxl_ena_x )
+        out_flag <= 2'b0;
+    else if( out_cnt == width_out )
+        out_flag <= out_flag + 2'b1;
+always @ ( posedge clk )
+    if( pxl_ena_x || rst )
+        out_cnt <= {{(C_WIDTH-1){1'b0}}, 1'b1};
+    else if( out_flag == 2'b01 )
+        out_cnt <= {{(C_WIDTH-1){1'b0}}, 1'b1};
+    else if( pxl_ena_y )
+        out_cnt <= out_cnt + 'd1;
+
+// delay count
 always @ ( posedge clk or rst )
     if( rst || pxl_ena_x )
-        dly_cnt <= {C_COUNT{1'b1}};
+        dly_cnt <= {{(C_COUNT-2){1'b0}}, 2'b10};
     else if( run )
         dly_cnt <= dly_cnt + 'd1;
 
-fp_add5 FP_ADDZ     (
+fp_add7 FP_ADDZ     (
     .clock          ( clk ),
     .dataa          ( result_add[8] ),
     .datab          ( pxl_y ),
