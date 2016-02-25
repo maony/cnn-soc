@@ -30,12 +30,13 @@ module conv2d_core #(
 );
 
 localparam C_COUNT  = 15;
-localparam D_PPL    = D_MUL + D_ADD * 3 + 1 * 2;
+localparam D_PPL    = D_MUL5 + D_ADD * 3 + 1 * 2;
 
-reg       [D_PPL+D_ADD-1:0] dly_ena_x[0:KS-1];
+reg         [D_PPL+D_ADD:0] dly_ena_x[0:KS-1];
 wire                  [0:0] run;
 reg                [KS-1:0] dly_pxl_ena;
 reg           [C_COUNT-1:0] dly_cnt;
+reg                  [31:0] pxl_x_reg;
 
 reg          [KS*KS*32-1:0] weight_reg;
 reg           [C_WIDTH-1:0] width_in;
@@ -45,7 +46,7 @@ wire                 [31:0] result_mul[0:KS*KS-1];
 wire                 [31:0] result_add[0:KS*KS-1];
 reg                  [31:0] result_add_dly[0:KS*(KS-1)];
 reg                  [31:0] dly_mul0[0:2];
-reg                  [31:0] dly_mul1[0:KS*7-1];
+reg                  [31:0] dly_mul1[0:KS*8-1];
 wire                 [31:0] dataa_add[0:KS*KS-1];
 wire                 [31:0] datab_add[0:KS*KS-1];
 
@@ -54,12 +55,12 @@ genvar                      g;
 always @ ( posedge clk )
     dly_pxl_ena[0] <= pxl_ena_x;
 always @ ( posedge clk or rst)
-    if( param_ena or rst )
+    if( param_ena || rst )
         dly_pxl_ena[1] <= 1'b0;
     else if(dly_cnt == ({6'd0, width_in}))
         dly_pxl_ena[1] <= 1'b1;
 always @ ( posedge clk or rst)
-    if( param_ena or rst )
+    if( param_ena || rst )
         dly_pxl_ena[2] <= 1'b0;
     else if(dly_cnt == ({5'd0, width_in, 1'b0}))
         dly_pxl_ena[2] <= 1'b1;
@@ -69,7 +70,7 @@ assign run[0] = (~dly_pxl_ena[0]) && pxl_ena_x;
 // delay count
 always @ ( posedge clk or rst )
     if( rst || run[0] )
-        dly_cnt <= {{(C_COUNT-2){1'b0}}, 2'b01};
+        dly_cnt <= {{(C_COUNT-2){1'b0}}, 2'b10};
     else if( pxl_ena_x )
         dly_cnt <= dly_cnt + 'd1;
 
@@ -79,13 +80,16 @@ always @ ( posedge clk or posedge rst )
         width_in    <= param_width_in;
     end
 
+always @ ( posedge clk )
+    pxl_x_reg <= pxl_x;
+    
 generate
     always @ ( posedge clk ) begin
         dly_ena_x[0][0] <= pxl_ena_x;
         dly_ena_x[1][0] <= pxl_ena_x & dly_pxl_ena[1];
         dly_ena_x[2][0] <= pxl_ena_x & dly_pxl_ena[2];
     end
-    for( g = 0; g < D_PPL+D_ADD; g = g + 1) begin:D_PPL
+    for( g = 0; g < D_PPL+D_ADD; g = g + 1) begin:MPPL
         always @ ( posedge clk ) begin
             dly_ena_x[0][g+1] <= dly_ena_x[0][g];
             dly_ena_x[1][g+1] <= dly_ena_x[1][g];
@@ -93,7 +97,7 @@ generate
         end
     end
 
-    for( g = 0; g < KS*KS; g = g + 1) begin:WADD
+    for( g = 0; g < KS*KS; g = g + 1) begin:MADD
         assign weight[g] = weight_reg[(g+1)*32-1:g*32];
 
         fp_add7 FP_ADD      (
@@ -103,52 +107,52 @@ generate
             .result         ( result_add[g] )
         );
     end
-    for( g = 0; g < KS; g = g + 1) begin:DADD
+    for( g = 0; g < KS; g = g + 1) begin:MADDD
         always @ ( posedge clk ) 
-            if( dly_ena_x[g][D_MUL+D_ADD-1] )
+            if( dly_ena_x[g][D_MUL5+D_ADD-1] )
                 result_add_dly[g*(KS-1)]    <= result_add[g*KS];
         always @ ( posedge clk ) 
-            if( dly_ena_x[g][D_MUL+D_ADD*2-1] )
+            if( dly_ena_x[g][D_MUL5+D_ADD*2-1] )
                 result_add_dly[g*(KS-1)+1]  <= result_add[g*KS+1];
     end
 
-    for( g = 0; g < KS; g = g + 1 ) begin:MUL
+    for( g = 0; g < KS; g = g + 1 ) begin:MMUL
         fp_mul5 FP_MUL0     (
             .clock          ( clk ),
             .dataa          ( weight[KS*g+0] ),
-            .datab          ( pxl_x ),
+            .datab          ( pxl_x_reg ),
             .result         ( result_mul[KS*g+0] )
         );
         fp_mul11 FP_MUL1    (
             .clock          ( clk ),
             .dataa          ( weight[KS*g+1] ),
-            .datab          ( pxl_x ),
+            .datab          ( pxl_x_reg ),
             .result         ( result_mul[KS*g+1] )
         );
         fp_mul11 FP_MUL2    (
             .clock          ( clk ),
             .dataa          ( weight[KS*g+2] ),
-            .datab          ( pxl_x ),
+            .datab          ( pxl_x_reg ),
             .result         ( result_mul[KS*g+2] )
         );
     end
     
-    for( g = 0; g < 6; g = g + 1) begin:DLY
+    for( g = 0; g < 7; g = g + 1) begin:MDLY
         always @ ( posedge clk ) begin
             dly_mul1[g+01] <= dly_mul1[g+00];
-            dly_mul1[g+08] <= dly_mul1[g+07];
-            dly_mul1[g+15] <= dly_mul1[g+14];
+            dly_mul1[g+09] <= dly_mul1[g+08];
+            dly_mul1[g+17] <= dly_mul1[g+16];
         end
     end
     
-    for( g = 0; g < KS-1; g = g + 1) begin:FF
+    for( g = 0; g < KS-1; g = g + 1) begin:MFF
         scfifo	SCFF (
             .aclr           ( rst ),
             .clock          ( clk ),
             .data           ( result_add[g*KS+2] ),
-            .rdreq          ( dly_ena_x[g][4] ),
+            .rdreq          ( dly_ena_x[g+1][4] ),
             .sclr           ( 1'b0 ),
-            .wrreq          ( dly_ena_x[g][D_PPL-1] ),
+            .wrreq          ( dly_ena_x[g][D_PPL] ),
             .almost_empty   ( ),
             .almost_full    ( ),
             .empty          ( ),
@@ -170,6 +174,7 @@ generate
 	        SCFF.overflow_checking = "ON",
 	        SCFF.underflow_checking = "ON",
 	        SCFF.use_eab = "ON";
+    end
 endgenerate
 
 always @ ( posedge clk ) begin
@@ -178,8 +183,8 @@ always @ ( posedge clk ) begin
     dly_mul0[2]  <= result_mul[7];
 
     dly_mul1[0]  <= result_mul[2];
-    dly_mul1[7]  <= result_mul[5];
-    dly_mul1[14] <= result_mul[8];
+    dly_mul1[8]  <= result_mul[5];
+    dly_mul1[16] <= result_mul[8];
 end
 
 assign dataa_add[0] = 32'd0;
@@ -191,16 +196,16 @@ assign dataa_add[7] = result_add_dly[4];
 assign dataa_add[8] = result_add_dly[5];
 assign datab_add[0] = result_mul[0];
 assign datab_add[1] = dly_mul0[0];
-assign datab_add[2] = dly_mul1[6];
+assign datab_add[2] = dly_mul1[7];
 assign datab_add[3] = result_mul[3];
 assign datab_add[4] = dly_mul0[1];
-assign datab_add[5] = dly_mul1[13];
+assign datab_add[5] = dly_mul1[15];
 assign datab_add[6] = result_mul[6];
 assign datab_add[7] = dly_mul0[2];
-assign datab_add[8] = dly_mul1[20];
+assign datab_add[8] = dly_mul1[23];
 
-assign pxl_ena_y = dly_ena_x[2][D_PPL-2];   
-assign pxl_ena_z = dly_ena_x[2][D_PPL+D_ADD-1];
+assign pxl_ena_y = dly_ena_x[2][D_PPL-1];
+assign pxl_ena_z = dly_ena_x[2][D_PPL+D_ADD];
 
 fp_add7 FP_ADDZ     (
     .clock          ( clk ),
