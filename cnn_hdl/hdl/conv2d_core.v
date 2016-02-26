@@ -17,6 +17,7 @@ module conv2d_core #(
     input                   param_ena,
     input    [KS*KS*32-1:0] param_weight,
     input     [C_WIDTH-1:0] param_width_in,
+    input     [C_WIDTH-1:0] param_height_out,
 
     input                   pxl_ena_x,
     input            [31:0] pxl_x,
@@ -39,6 +40,10 @@ reg                  [31:0] pxl_x_reg;
 
 reg          [KS*KS*32-1:0] weight_reg;
 reg           [C_WIDTH-1:0] width_in;
+reg           [C_WIDTH-1:0] height_out;
+reg           [C_WIDTH-1:0] cnt_z;
+reg           [C_WIDTH-1:0] cnt_y;
+reg           [C_WIDTH-1:0] cnt_h;
 
 wire                 [31:0] weight[0:KS*KS-1];
 wire                 [31:0] result_mul[0:KS*KS-1];
@@ -49,30 +54,33 @@ reg                  [31:0] dly_mul1[0:KS*8-1];
 wire                 [31:0] dataa_add[0:KS*KS-1];
 wire                 [31:0] datab_add[0:KS*KS-1];
 
+reg                   [2:0] act;
+wire                        syn_clr;
+
 genvar                      g;
 
-always @ ( posedge clk or rst)
-    if( param_ena || rst )
+always @ ( posedge clk )
+    if( param_ena )
         dly_pxl_ena[1] <= 1'b0;
     else if(dly_cnt == ({6'd0, width_in}))
         dly_pxl_ena[1] <= 1'b1;
-always @ ( posedge clk or rst)
-    if( param_ena || rst )
+always @ ( posedge clk )
+    if( param_ena )
         dly_pxl_ena[2] <= 1'b0;
     else if(dly_cnt == ({5'd0, width_in, 1'b0}))
         dly_pxl_ena[2] <= 1'b1;
 
-// delay count
-always @ ( posedge clk or rst )
-    if( rst || param_ena )
+always @ ( posedge clk )
+    if( param_ena )
         dly_cnt <= {{(C_COUNT-2){1'b0}}, 2'b01};
     else if( pxl_ena_x )
         dly_cnt <= dly_cnt + 'd1;
 
-always @ ( posedge clk or posedge rst )
+always @ ( posedge clk )
     if( param_ena ) begin
         weight_reg  <= param_weight;
         width_in    <= param_width_in;
+        height_out  <= param_height_out;
     end
 
 always @ ( posedge clk )
@@ -80,15 +88,15 @@ always @ ( posedge clk )
     
 generate
     always @ ( posedge clk ) begin
-        dly_ena_x[0][0] <= pxl_ena_x;
-        dly_ena_x[1][0] <= pxl_ena_x & dly_pxl_ena[1];
-        dly_ena_x[2][0] <= pxl_ena_x & dly_pxl_ena[2];
+        dly_ena_x[0][0] <= pxl_ena_x & (~syn_clr);
+        dly_ena_x[1][0] <= pxl_ena_x & dly_pxl_ena[1] & (~syn_clr);
+        dly_ena_x[2][0] <= pxl_ena_x & dly_pxl_ena[2] & (~syn_clr);
     end
     for( g = 0; g < D_PPL+D_ADD; g = g + 1) begin:MPPL
         always @ ( posedge clk ) begin
-            dly_ena_x[0][g+1] <= dly_ena_x[0][g];
-            dly_ena_x[1][g+1] <= dly_ena_x[1][g];
-            dly_ena_x[2][g+1] <= dly_ena_x[2][g];
+            dly_ena_x[0][g+1] <= dly_ena_x[0][g] & (~syn_clr);
+            dly_ena_x[1][g+1] <= dly_ena_x[1][g] & (~syn_clr);
+            dly_ena_x[2][g+1] <= dly_ena_x[2][g] & (~syn_clr);
         end
     end
 
@@ -142,7 +150,7 @@ generate
     
     for( g = 0; g < KS-1; g = g + 1) begin:MFF
         scfifo	SCFF (
-            .aclr           ( rst ),
+            .aclr           ( rst || syn_clr ),
             .clock          ( clk ),
             .data           ( result_add[g*KS+2] ),
             .rdreq          ( dly_ena_x[g+1][4] ),
@@ -187,8 +195,39 @@ endgenerate
 
 assign dataa_add[0] = 32'd0;
 
-assign pxl_ena_y = dly_ena_x[2][D_PPL-1];
-assign pxl_ena_z = dly_ena_x[2][D_PPL+D_ADD];
+always @ ( posedge clk )
+    if( param_ena || act[0] )
+        cnt_y <= 'd1;
+    else if( dly_ena_x[2][D_PPL-2] ) begin
+        if( cnt_y == width_in )
+            cnt_y <= 'd1;
+        else
+            cnt_y <= cnt_y + 'd1;
+    end
+always @ ( posedge clk )
+    if( param_ena || act[0] )
+        cnt_z <= 'd1;
+    else if( dly_ena_x[2][D_PPL+D_ADD-1] ) begin
+        if( cnt_z == width_in)
+            cnt_z <= 'd1;
+        else
+            cnt_z <= cnt_z + 'd1;
+    end
+always @ ( posedge clk )
+    if( param_ena || act[0] )
+        cnt_h <= 'd0;
+    else if( dly_ena_x[2][D_PPL+D_ADD-1] & (cnt_z == (width_in-'d2)) )
+        cnt_h <= cnt_h + 'd1;
+
+always @ ( posedge clk ) begin
+    act[0] <= ( cnt_h == height_out );
+    act[1] <= ~(cnt_y > (width_in-'d2));
+    act[2] <= ~(cnt_z > (width_in-'d2));
+end
+
+assign syn_clr   = (~act[0]) && ( cnt_h == height_out );
+assign pxl_ena_y = dly_ena_x[2][D_PPL-1] & act[1];
+assign pxl_ena_z = dly_ena_x[2][D_PPL+D_ADD] & act[2];
 
 fp_add7 FP_ADDZ     (
     .clock          ( clk ),
