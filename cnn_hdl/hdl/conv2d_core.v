@@ -77,13 +77,11 @@ always @ ( posedge clk )
     else if( pxl_ena_x )
         dly_cnt <= dly_cnt + 'd1;
 
-always @ ( posedge clk )
-    if( param_ena ) begin
-        weight_reg  <= param_weight;
-        width_in    <= param_width_in;
-        height_out  <= param_height_out;
-    end
-
+always @ ( posedge clk )    begin
+    weight_reg  <= param_weight;
+    width_in    <= param_width_in;
+    height_out  <= param_height_out;
+end
 always @ ( posedge clk )
     pxl_x_reg <= pxl_x;
     
