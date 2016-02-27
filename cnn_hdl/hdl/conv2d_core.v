@@ -25,6 +25,7 @@ module conv2d_core #(
     input            [31:0] pxl_y,
     output                  pxl_ena_z,
     output           [31:0] pxl_z,
+    output                  pxl_ovr,
 
     input                   clk,
     input                   rst
@@ -226,6 +227,7 @@ always @ ( posedge clk ) begin
 end
 
 assign syn_clr   = (~act[0]) && ( cnt_h == height_out );
+assign pxl_ovr   = syn_clr;
 assign pxl_ena_y = dly_ena_x[2][D_PPL-1] & act[1];
 assign pxl_ena_z = dly_ena_x[2][D_PPL+D_ADD] & act[2];
 
