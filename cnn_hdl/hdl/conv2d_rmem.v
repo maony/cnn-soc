@@ -64,11 +64,11 @@ reg                   [2:0] prefetch_reg;
 reg                [AW-1:0] yaddr;
 reg                  [17:0] length_in;
 reg                  [17:0] length_out;
-reg                   [2:0] cnt_write;
+reg                   [2:0] cnt_word;
 
 reg                         select_weight;
 reg                   [7:0] length_w;
-reg                   [7:0] cnt_ww;
+reg                   [7:0] cnt_write_w;
 reg                   [7:0] cnt_rw;
 reg                         ena_write_w;
 reg                   [7:0] addr_write_w;
@@ -108,14 +108,10 @@ always @ ( posedge clk or posedge rst ) begin
     prefetch_reg[0] <= param_prefetch;
     prefetch_reg[1] <= (~prefetch_reg[0]) & param_prefetch;
     prefetch_reg[2] <= prefetch_reg[1];
-    if( rst == 1'b1 )   begin
+    if( rst == 1'b1 )
         length_w <= 'b0;
-        cnt_ww   <= 'd0;
-    end
-    else if( prefetch_reg[1] ) begin
+    else if( prefetch_reg[1] )
         length_w <= param_length_w[7:2] + ((param_length_w & 8'h03) ? 8'd2 : 8'd0);
-        cnt_ww   <= param_length_w[7:2] + ((param_length_w & 8'h03) ? 8'd2 : 8'd0);
-    end
     else if( go[0] )
         length_w <= length_w - 8'd2;
 end
@@ -131,7 +127,7 @@ always @ ( posedge clk or posedge rst )
         select_weight <= 1'b0;
     else if( prefetch_reg[1] )
         select_weight <= 1'b1;
-    else if( (cnt_rw == cnt_ww) && (!rmst_user_data_available) )
+    else if( (cnt_write_w == {cnt_rw, 2'b0}) && (!rmst_user_data_available) && (cnt_word == 3'd0) )
         select_weight <= 1'b0;
 always @ ( posedge clk or posedge rst )
     if( rst == 1'b1 )
@@ -144,33 +140,41 @@ always @ ( posedge clk or posedge rst )
 assign go[0] = (prefetch_reg[2] || done[2]) && (length_w > 0);
 
 always @ ( posedge clk )
-    if( select_weight & rmst_user_data_available & (cnt_write == 'd0) )
+    if( select_weight & rmst_user_data_available & (cnt_word == 'd0) )
         read[0] <= 1'b1;
     else
         read[0] <= 1'b0;
 always @ ( posedge clk )
     if( rmst_user_read_buffer )
         data <= rmst_user_buffer_data;
-    else if( cnt_write > 'd0 )
+    else if( cnt_word > 'd0 )
         data <= {32'd0, data[DW-1:32]};
 always @ ( posedge clk or posedge rst )
     if( rst == 1'b1 )
-        cnt_write <= 3'b0;
+        cnt_word <= 3'b0;
     else if( ((cnt_x == length_in) && select_x) || ((cnt_y == length_out) && select_y) )
-        cnt_write <= 3'd0;
+        cnt_word <= 3'd0;
     else if( rmst_user_read_buffer )
-        cnt_write <= 3'd4;
+        cnt_word <= 3'd4;
     else if( ena_write_w || ena_write_x || ena_write_y )
-        cnt_write <= cnt_write - 3'd1;
+        cnt_word <= cnt_word - 3'd1;
+always @ ( posedge clk or posedge rst )
+    if( rst == 1'b1 )
+        cnt_write_w <= 'd0;
+    else if( prefetch_reg[1] )
+        cnt_write_w <= 'd0;
+    else if( ena_write_w )
+        cnt_write_w <= cnt_write_w + 'd1;
+
 always @ ( posedge clk )
-    if( (cnt_write > 'd0) & select_weight )
+    if( (cnt_word > 'd0) & select_weight )
         ena_write_w <= 1'b1;
     else
         ena_write_w <= 1'b0;
 always @ ( posedge clk )
     if( prefetch_reg[1] )
         addr_write_w <= 8'hFF;
-    else if( (cnt_write > 'd0) & select_weight )
+    else if( (cnt_word > 'd0) & select_weight )
         addr_write_w <= addr_write_w + 'd1;
 
 always @ ( posedge clk )
@@ -242,14 +246,14 @@ end
 assign go[1] = (xy_ena[2] || done[2] || iter_x[1]) && (length_x > 'd0);
 
 always @ ( posedge clk )
-    if( select_x & rmst_user_data_available & (cnt_write == 'd0) & almost_empty_x )
+    if( select_x & rmst_user_data_available & (cnt_word == 'd0) & almost_empty_x )
         read[1] <= 1'b1;
     else
         read[1] <= 1'b0;
 always @ ( posedge clk )
     if( (cnt_x == length_in) && select_x )
         ena_write_x <= 1'b0;
-    else if( (cnt_write > 'd0) & select_x )
+    else if( (cnt_word > 'd0) & select_x )
         ena_write_x <= 1'b1;
     else
         ena_write_x <= 1'b0;
@@ -258,7 +262,7 @@ always @ ( posedge clk or posedge rst )
         cnt_x <= 'd0;
     else if( (cnt_x == length_in) && select_x )
         cnt_x <= cnt_x;
-    else if( (cnt_write > 'd0) & select_x )
+    else if( (cnt_word > 'd0) & select_x )
         cnt_x <= cnt_x + 'd1;
 
 always @ ( posedge clk ) begin
@@ -296,14 +300,14 @@ end
 assign go[2] = (done[2] || iter_y[2]) && (length_y > 'd0);
 
 always @ ( posedge clk )
-    if( select_y & rmst_user_data_available & (cnt_write == 'd0) & almost_empty_y )
+    if( select_y & rmst_user_data_available & (cnt_word == 'd0) & almost_empty_y )
         read[2] <= 1'b1;
     else
         read[2] <= 1'b0;
 always @ ( posedge clk )
     if( (cnt_y == length_out) && select_y)
         ena_write_y <= 1'b0;
-    else if( (cnt_write > 'd0) & select_y )
+    else if( (cnt_word > 'd0) & select_y )
         ena_write_y <= 1'b1;
     else
         ena_write_y <= 1'b0;
@@ -312,7 +316,7 @@ always @ ( posedge clk or posedge rst )
         cnt_y <= 'd0;
     else if( (cnt_y == length_out) && select_y)
         cnt_y <= cnt_y;
-    else if( (cnt_write > 'd0) & select_y )
+    else if( (cnt_word > 'd0) & select_y )
         cnt_y <= cnt_y + 'd1;
         
 always @ ( posedge clk or posedge rst )
