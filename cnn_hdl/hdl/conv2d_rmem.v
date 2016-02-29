@@ -9,7 +9,7 @@
 
 module conv2d_rmem #(
     parameter KS = 3,
-    parameter AW = 30,
+    parameter AW = 32,
     parameter DW = 128
 )(
     output                          rmst_ctrl_fixed_location,
@@ -52,13 +52,15 @@ localparam      [06:00]
                 S_READ_Y    = 'h00_00_00_20,
                 S_JUDGE     = 'h00_00_00_40;
 
+reg                 [06:00] s_cur;
+reg                 [06:00] s_nxt;
 reg                [AW-1:0] read_base[0:2];
-reg                         go[0:2];
-reg                   [1:0] done;
+wire                        go[0:2];
+reg                   [2:0] done;
 reg                         read[0:2];
 reg                [DW-1:0] data;
 
-reg                   [1:0] prefetch_reg;
+reg                   [2:0] prefetch_reg;
 reg                [AW-1:0] yaddr;
 reg                  [17:0] length_in;
 reg                  [17:0] length_out;
@@ -66,6 +68,8 @@ reg                   [2:0] cnt_write;
 
 reg                         select_weight;
 reg                   [7:0] length_w;
+reg                   [7:0] cnt_ww;
+reg                   [7:0] cnt_rw;
 reg                         ena_write_w;
 reg                   [7:0] addr_write_w;
 reg                   [7:0] addr_read_w;
@@ -74,9 +78,8 @@ reg          [KS*KS*32-1:0] pxl_w_reg;
 wire                 [31:0] ram_wq;
 
 reg                         select_x;
-reg                   [1:0] xy_ena;
+reg                   [2:0] xy_ena;
 reg                   [1:0] iter_x;
-reg                   [9:0] length_x;
 reg                   [9:0] length_x;
 reg                         ena_write_x;
 reg                  [17:0] cnt_x;
@@ -101,30 +104,44 @@ assign rmst_user_read_buffer = read[0] | read[1] | read[2];
 always @ ( posedge clk or posedge rst ) begin
     done[0] <= rmst_ctrl_done;
     done[1] <= (~done[0]) & rmst_ctrl_done;
+    done[2] <= done[1];
     prefetch_reg[0] <= param_prefetch;
     prefetch_reg[1] <= (~prefetch_reg[0]) & param_prefetch;
-    if( rst == 1'b1 )
+    prefetch_reg[2] <= prefetch_reg[1];
+    if( rst == 1'b1 )   begin
         length_w <= 'b0;
-    else if( (~prefetch_reg[0]) & param_prefetch )
-        length_w <= param_length_w[7:2] + ((param_length_w & 8'h03) ? 8'd2 : 8'd0 );
+        cnt_ww   <= 'd0;
+    end
+    else if( prefetch_reg[1] ) begin
+        length_w <= param_length_w[7:2] + ((param_length_w & 8'h03) ? 8'd2 : 8'd0);
+        cnt_ww   <= param_length_w[7:2] + ((param_length_w & 8'h03) ? 8'd2 : 8'd0);
+    end
     else if( go[0] )
         length_w <= length_w - 8'd2;
 end
-always @ ( posedge clk )
-    if( (~prefetch_reg[0]) & param_prefetch )
+always @ ( posedge clk or posedge rst )
+    if( rst == 1'b1 )
+        read_base[0] <= 'd0;
+    else if( prefetch_reg[1] )
         read_base[0] <= param_waddr;
     else if( go[0] )
         read_base[0] <= read_base[0] + 'd8;
- 
 always @ ( posedge clk or posedge rst )
     if( rst == 1'b1 )
         select_weight <= 1'b0;
-    else if( (~prefetch_reg[0]) & param_prefetch )
+    else if( prefetch_reg[1] )
         select_weight <= 1'b1;
-    else if( (length_w == 'd0) && (!rmst_user_data_available) )
+    else if( (cnt_rw == cnt_ww) && (!rmst_user_data_available) )
         select_weight <= 1'b0;
+always @ ( posedge clk or posedge rst )
+    if( rst == 1'b1 )
+        cnt_rw <= 'd0;
+    else if( prefetch_reg[1] )
+        cnt_rw <= 'd0;
+    else if( rmst_user_read_buffer )
+        cnt_rw <= cnt_rw + 'd1;
 
-assign go[0] = (prefetch_reg[1] || done[1]) && (length_w > 0);
+assign go[0] = (prefetch_reg[2] || done[2]) && (length_w > 0);
 
 always @ ( posedge clk )
     if( select_weight & rmst_user_data_available & (cnt_write == 'd0) )
@@ -139,7 +156,7 @@ always @ ( posedge clk )
 always @ ( posedge clk or posedge rst )
     if( rst == 1'b1 )
         cnt_write <= 3'b0;
-    else if( (cnt_x == length_in) || (cnt_y == length_out) )
+    else if( ((cnt_x == length_in) && select_x) || ((cnt_y == length_out) && select_y) )
         cnt_write <= 3'd0;
     else if( rmst_user_read_buffer )
         cnt_write <= 3'd4;
@@ -151,18 +168,18 @@ always @ ( posedge clk )
     else
         ena_write_w <= 1'b0;
 always @ ( posedge clk )
-    if( (~prefetch_reg[0]) & param_prefetch )
+    if( prefetch_reg[1] )
         addr_write_w <= 8'hFF;
     else if( (cnt_write > 'd0) & select_weight )
         addr_write_w <= addr_write_w + 'd1;
 
 always @ ( posedge clk )
-    if( (~xy_ena[0]) && param_ena )
-        addr_read_w <= 8'hff;
+    if( xy_ena[1] )
+        addr_read_w <= 8'h0;
     else if( cnt_read_w > 'd0 )
         addr_read_w <= addr_read_w + 'd1;
 always @ ( posedge clk )
-    if( (~xy_ena[0]) && param_ena )
+    if( xy_ena[1] )
         cnt_read_w <= 'd9;
     else if( cnt_read_w > 'd0 )
         cnt_read_w <= cnt_read_w - 'd1;
@@ -173,9 +190,17 @@ always @ ( posedge clk )
 always @ ( posedge clk ) begin
     xy_ena[0] <= param_ena;
     xy_ena[1] <= (~xy_ena[0]) && param_ena;
-    if( (~xy_ena[0]) && param_ena ) begin
+    xy_ena[2] <= xy_ena[1];
+end
+always @ ( posedge clk or posedge rst ) begin
+    if( rst == 1'b1 )   begin
+        yaddr <= 'd0;
+        length_in <= 'hff_ff_ff_ff;
+        length_out <= 'hff_ff_ff_ff;
+    end
+    else if( xy_ena[1] ) begin
         yaddr <= param_yaddr;
-        length_in <= parma_length_in;
+        length_in <= param_length_in;
         length_out <= param_length_out;
     end
 end
@@ -187,30 +212,34 @@ always @ ( posedge clk ) begin
     else
         iter_x[0] <= 1'b0;
 end
-always @ ( posedge clk )
-    if( (~xy_ena[0]) && param_ena )
-        length_x <= {'d0, param_width_in[8:1]};
-    else if( cnt_x == length_in )
+always @ ( posedge clk or posedge rst )
+    if( rst == 1'b1 )
+        length_x <= 'd0;
+    else if( xy_ena[1] )
+        length_x <= {2'd0, param_width_in[8:1]};
+    else if( (cnt_x == length_in) && select_x )
         length_x <= 'd0;
     else if( s_cur[2] )
         length_x <= 'd4;
     else if( go[1] )
         length_x <= length_x - 'd2;
-always @ ( posedge clk )
-    if( (~xy_ena[0]) && param_ena )
+always @ ( posedge clk or posedge rst )
+    if( rst == 1'b1 )
+        read_base[1] <= 'd0;
+    else if( xy_ena[1] )
         read_base[1] <= param_xaddr;
     else if( go[1] )
         read_base[1] <= read_base[1] + 'd8;
 always @ ( posedge clk or posedge rst ) begin
     if( rst == 1'b1 )
         select_x <= 1'b0;
-    else if( ((~xy_ena[0]) && param_ena) || s_cur[2] )
+    else if( xy_ena[1] || s_cur[2] )
         select_x <= 1'b1;
     else if( (length_x == 'd0) && (!rmst_user_data_available) )
         select_x <= 1'b0;
 end
 
-assign go[1] = (xy_ena[1] || done[1] || iter_x[1]) && (length_x > 'd0);
+assign go[1] = (xy_ena[2] || done[2] || iter_x[1]) && (length_x > 'd0);
 
 always @ ( posedge clk )
     if( select_x & rmst_user_data_available & (cnt_write == 'd0) & almost_empty_x )
@@ -218,18 +247,18 @@ always @ ( posedge clk )
     else
         read[1] <= 1'b0;
 always @ ( posedge clk )
-    if( cnt_x == length_in )
+    if( (cnt_x == length_in) && select_x )
         ena_write_x <= 1'b0;
     else if( (cnt_write > 'd0) & select_x )
         ena_write_x <= 1'b1;
     else
         ena_write_x <= 1'b0;
-always @ ( posedge clk )
-    if( (~xy_ena[0]) && param_ena )
+always @ ( posedge clk or posedge rst )
+    if( xy_ena[1] | (rst == 1'b1) )
         cnt_x <= 'd0;
-    else if( cnt_x == length_in )
+    else if( (cnt_x == length_in) && select_x )
         cnt_x <= cnt_x;
-    else if( (cnt_write > 'd0) & selsect_x )
+    else if( (cnt_write > 'd0) & select_x )
         cnt_x <= cnt_x + 'd1;
 
 always @ ( posedge clk ) begin
@@ -239,15 +268,19 @@ always @ ( posedge clk ) begin
     else
         iter_y[0] <= 1'b0;
 end
-always @ ( posedge clk )
-    if( cnt_y == length_out )
+always @ ( posedge clk or posedge rst )
+    if( rst == 1'b1 )
+        length_y <= 'd0;
+    else if( (cnt_y == length_out) && select_y )
         length_y <= 'd0;
     else if( s_cur[4] )
         length_y <= 'd4;
     else if( go[2] )
         length_y <= length_y - 'd2;
-always @ ( posedge clk )
-    if( (~xy_ena[0]) && param_ena )
+always @ ( posedge clk or posedge rst )
+    if( rst == 1'b1 )
+        read_base[2] <= 'd0;
+    else if( xy_ena[1] )
         read_base[2] <= param_yaddr;
     else if( go[2] )
         read_base[2] <= read_base[2] + 'd8;
@@ -260,7 +293,7 @@ always @ ( posedge clk or posedge rst ) begin
         select_y <= 1'b0;
 end
 
-assign go[2] = (done[1] || iter_y[1]) && (length_y > 'd0);
+assign go[2] = (done[2] || iter_y[2]) && (length_y > 'd0);
 
 always @ ( posedge clk )
     if( select_y & rmst_user_data_available & (cnt_write == 'd0) & almost_empty_y )
@@ -268,18 +301,18 @@ always @ ( posedge clk )
     else
         read[2] <= 1'b0;
 always @ ( posedge clk )
-    if( cnt_y == length_out )
+    if( (cnt_y == length_out) && select_y)
         ena_write_y <= 1'b0;
     else if( (cnt_write > 'd0) & select_y )
         ena_write_y <= 1'b1;
     else
         ena_write_y <= 1'b0;
-always @ ( posedge clk )
-    if( (~xy_ena[0]) && param_ena )
+always @ ( posedge clk or posedge rst )
+    if( xy_ena[1] | (rst == 1'b1) )
         cnt_y <= 'd0;
-    else if( cnt_y == length_out )
+    else if( (cnt_y == length_out) && select_y)
         cnt_y <= cnt_y;
-    else if( (cnt_write > 'd0) & selsect_y )
+    else if( (cnt_write > 'd0) & select_y )
         cnt_y <= cnt_y + 'd1;
         
 always @ ( posedge clk or posedge rst )
@@ -288,11 +321,11 @@ always @ ( posedge clk or posedge rst )
     else
         s_cur <= s_nxt;
 always @ ( * ) begin
-    s_nxt = S_IDLE
+    s_nxt = S_IDLE;
     case ( s_cur )
         S_IDLE:     begin
             s_nxt = S_IDLE;
-            if( (~xy_ena[0]) && param_ena )
+            if( xy_ena[1] )
                 s_nxt = S_READ_X2;
         end
         S_READ_X2:  begin
