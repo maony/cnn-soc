@@ -69,13 +69,14 @@ reg                   [2:0] cnt_word;
 reg                         select_weight;
 reg                   [7:0] length_w;
 reg                   [7:0] cnt_write_w;
-reg                   [7:0] cnt_rw;
+reg                   [9:0] cnt_rw;
 reg                         ena_write_w;
 reg                   [7:0] addr_write_w;
 reg                   [7:0] addr_read_w;
 reg                   [3:0] cnt_read_w;
 reg          [KS*KS*32-1:0] pxl_w_reg;
 wire                 [31:0] ram_wq;
+reg                  [31:0] ram_wdata;
 
 reg                         select_x;
 reg                   [2:0] xy_ena;
@@ -89,6 +90,8 @@ wire                        almost_empty_y;
 wire                        empty_x;
 reg                         ena_read_x;
 
+reg                  [11:0] cnt_write_x;
+reg                  [11:0] cnt_write_y;
 reg                         select_y;
 reg                   [1:0] iter_y;
 reg                   [2:0] length_y;
@@ -100,6 +103,8 @@ assign rmst_ctrl_read_base = select_weight ? read_base[0] : (select_x ? read_bas
 assign rmst_ctrl_read_length = 'd2;
 assign rmst_ctrl_go = go[0] | go[1] | go[2];
 assign rmst_user_read_buffer = read[0] | read[1] | read[2];
+
+assign pxl_w = pxl_w_reg;
 
 always @ ( posedge clk or posedge rst ) begin
     done[0] <= rmst_ctrl_done;
@@ -127,12 +132,12 @@ always @ ( posedge clk or posedge rst )
         select_weight <= 1'b0;
     else if( prefetch_reg[1] )
         select_weight <= 1'b1;
-    else if( (cnt_write_w == {cnt_rw, 2'b0}) && (!rmst_user_data_available) && (cnt_word == 3'd0) )
+    else if( (cnt_write_w == {cnt_rw, 2'b0}) && (!rmst_user_data_available) && (cnt_word == 3'd0) && (length_w == 'd0) )
         select_weight <= 1'b0;
 always @ ( posedge clk or posedge rst )
     if( rst == 1'b1 )
         cnt_rw <= 'd0;
-    else if( prefetch_reg[1] )
+    else if( prefetch_reg[1] || xy_ena[1] || s_cur[2] || s_cur[4] )
         cnt_rw <= 'd0;
     else if( rmst_user_read_buffer )
         cnt_rw <= cnt_rw + 'd1;
@@ -140,15 +145,17 @@ always @ ( posedge clk or posedge rst )
 assign go[0] = (prefetch_reg[2] || done[2]) && (length_w > 0);
 
 always @ ( posedge clk )
-    if( select_weight & rmst_user_data_available & (cnt_word == 'd0) )
+    if( select_weight & rmst_user_data_available & (cnt_word == 'd0) & (~read[0]) )
         read[0] <= 1'b1;
     else
         read[0] <= 1'b0;
-always @ ( posedge clk )
+always @ ( posedge clk )    begin
+    ram_wdata <= data[31:0];
     if( rmst_user_read_buffer )
         data <= rmst_user_buffer_data;
     else if( cnt_word > 'd0 )
         data <= {32'd0, data[DW-1:32]};
+end
 always @ ( posedge clk or posedge rst )
     if( rst == 1'b1 )
         cnt_word <= 3'b0;
@@ -156,7 +163,7 @@ always @ ( posedge clk or posedge rst )
         cnt_word <= 3'd0;
     else if( rmst_user_read_buffer )
         cnt_word <= 3'd4;
-    else if( ena_write_w || ena_write_x || ena_write_y )
+    else if( cnt_word > 'd0 )
         cnt_word <= cnt_word - 3'd1;
 always @ ( posedge clk or posedge rst )
     if( rst == 1'b1 )
@@ -165,7 +172,6 @@ always @ ( posedge clk or posedge rst )
         cnt_write_w <= 'd0;
     else if( ena_write_w )
         cnt_write_w <= cnt_write_w + 'd1;
-
 always @ ( posedge clk )
     if( (cnt_word > 'd0) & select_weight )
         ena_write_w <= 1'b1;
@@ -184,12 +190,12 @@ always @ ( posedge clk )
         addr_read_w <= addr_read_w + 'd1;
 always @ ( posedge clk )
     if( xy_ena[1] )
-        cnt_read_w <= 'd9;
+        cnt_read_w <= 'd10;
     else if( cnt_read_w > 'd0 )
         cnt_read_w <= cnt_read_w - 'd1;
 always @ ( posedge clk )
     if( cnt_read_w > 'd0 )
-        pxl_w_reg <= {ram_wq, pxl_w_reg[KS*KS*32-1:KS*(KS-1)*32]};
+        pxl_w_reg <= {ram_wq, pxl_w_reg[KS*KS*32-1:32]};
         
 always @ ( posedge clk ) begin
     xy_ena[0] <= param_ena;
@@ -221,8 +227,6 @@ always @ ( posedge clk or posedge rst )
         length_x <= 'd0;
     else if( xy_ena[1] )
         length_x <= {2'd0, param_width_in[8:1]};
-    else if( (cnt_x == length_in) && select_x )
-        length_x <= 'd0;
     else if( s_cur[2] )
         length_x <= 'd4;
     else if( go[1] )
@@ -239,21 +243,30 @@ always @ ( posedge clk or posedge rst ) begin
         select_x <= 1'b0;
     else if( xy_ena[1] || s_cur[2] )
         select_x <= 1'b1;
-    else if( (length_x == 'd0) && (!rmst_user_data_available) )
+    else if( s_cur[6] )
+        select_x <= 1'b0;
+    else if( (cnt_write_x == {cnt_rw, 2'b0}) && (!rmst_user_data_available) && (cnt_word == 3'd0) && (length_x == 'd0) )
         select_x <= 1'b0;
 end
 
 assign go[1] = (xy_ena[2] || done[2] || iter_x[1]) && (length_x > 'd0);
 
 always @ ( posedge clk )
-    if( select_x & rmst_user_data_available & (cnt_word == 'd0) & almost_empty_x )
+    if( select_x & rmst_user_data_available & (cnt_word == 'd0) & (~read[1]) & almost_empty_x )
         read[1] <= 1'b1;
     else
         read[1] <= 1'b0;
+always @ ( posedge clk or posedge rst )
+    if( rst == 1'b1 )
+        cnt_write_x <= 'd0;
+    else if( xy_ena[1] || s_cur[2] )
+        cnt_write_x <= 'd0;
+    else if( ena_write_x )
+        cnt_write_x <= cnt_write_x + 'd1;
 always @ ( posedge clk )
     if( (cnt_x == length_in) && select_x )
         ena_write_x <= 1'b0;
-    else if( (cnt_word > 'd0) & select_x )
+    else if( (cnt_word > 'd0) && select_x )
         ena_write_x <= 1'b1;
     else
         ena_write_x <= 1'b0;
@@ -262,7 +275,7 @@ always @ ( posedge clk or posedge rst )
         cnt_x <= 'd0;
     else if( (cnt_x == length_in) && select_x )
         cnt_x <= cnt_x;
-    else if( (cnt_word > 'd0) & select_x )
+    else if( ena_write_x )
         cnt_x <= cnt_x + 'd1;
 
 always @ ( posedge clk ) begin
@@ -291,21 +304,30 @@ always @ ( posedge clk or posedge rst )
 always @ ( posedge clk or posedge rst ) begin
     if( rst == 1'b1 )
         select_y <= 1'b0;
+    else if( s_cur[6] )
+        select_y <= 1'b0;
     else if( s_cur[4] )
         select_y <= 1'b1;
-    else if( (length_y == 'd0) && (!rmst_user_data_available) )
+    else if( (cnt_write_y == {cnt_rw, 2'b0}) && (!rmst_user_data_available) && (cnt_word == 3'd0) && (length_y == 'd0) )
         select_y <= 1'b0;
 end
 
-assign go[2] = (done[2] || iter_y[2]) && (length_y > 'd0);
+assign go[2] = (done[2] || iter_y[1]) && (length_y > 'd0);
 
 always @ ( posedge clk )
-    if( select_y & rmst_user_data_available & (cnt_word == 'd0) & almost_empty_y )
+    if( select_y & rmst_user_data_available & (cnt_word == 'd0) & (~read[2]) & almost_empty_y )
         read[2] <= 1'b1;
     else
         read[2] <= 1'b0;
+always @ ( posedge clk or posedge rst )
+    if( rst == 1'b1 )
+        cnt_write_y <= 'd0;
+    else if( s_cur[4] )
+        cnt_write_y <= 'd0;
+    else if( ena_write_y )
+        cnt_write_y <= cnt_write_y + 'd1;
 always @ ( posedge clk )
-    if( (cnt_y == length_out) && select_y)
+    if( (cnt_y == length_out) & select_y)
         ena_write_y <= 1'b0;
     else if( (cnt_word > 'd0) & select_y )
         ena_write_y <= 1'b1;
@@ -316,7 +338,7 @@ always @ ( posedge clk or posedge rst )
         cnt_y <= 'd0;
     else if( (cnt_y == length_out) && select_y)
         cnt_y <= cnt_y;
-    else if( (cnt_word > 'd0) & select_y )
+    else if( ena_write_y )
         cnt_y <= cnt_y + 'd1;
         
 always @ ( posedge clk or posedge rst )
@@ -344,7 +366,7 @@ always @ ( * ) begin
         end
         S_READ_X:   begin
             s_nxt = S_READ_X;
-            if( ~select_x )
+            if( (~select_x) || (cnt_x == length_in) )
                 s_nxt = S_WAIT_Y;
         end
         S_WAIT_Y:   begin
@@ -354,7 +376,7 @@ always @ ( * ) begin
         end
         S_READ_Y:   begin
             s_nxt = S_READ_Y;
-            if( ~select_y )
+            if( (~select_y) || (cnt_y == length_out) )
                 s_nxt = S_JUDGE;
         end
         S_JUDGE:    begin
@@ -373,7 +395,7 @@ altsyncram	WRAM (
 			.address_a (addr_write_w),
 			.address_b (addr_read_w),
 			.clock0 (clk),
-			.data_a (data[31:0]),
+			.data_a (ram_wdata),
 			.wren_a (ena_write_w),
 			.q_b (ram_wq),
 			.aclr0 (1'b0),
@@ -414,11 +436,20 @@ defparam
 	WRAM.width_b = 32,
 	WRAM.width_byteena_a = 1;
 
+reg         syn_xy;
+always @ ( posedge clk or posedge rst )
+    if( rst == 1'b1 )
+        syn_xy <= 1'b0;
+    else if( s_cur[0] )
+        syn_xy <= 1'b0;
+    else if( s_cur[2] )
+        syn_xy <= 1'b1;
+    
 assign pxl_ena_x = ena_read_x;
 always @ ( posedge clk or posedge rst )
     if( rst == 1'b1 )
         ena_read_x <= 1'b0;
-    else if( ~empty_x )
+    else if( (~empty_x) && syn_xy )
         ena_read_x <= 1'b1;
     else
         ena_read_x <= 1'b0;
@@ -426,7 +457,7 @@ always @ ( posedge clk or posedge rst )
 scfifo	SCFFX (
     .aclr           ( rst ),
     .clock          ( clk ),
-    .data           ( data[31:0] ),
+    .data           ( ram_wdata ),
     .rdreq          ( ena_read_x ),
     .sclr           ( 1'b0 ),
     .wrreq          ( ena_write_x ),
@@ -451,11 +482,51 @@ defparam
     SCFFX.overflow_checking = "ON",
     SCFFX.underflow_checking = "ON",
     SCFFX.use_eab = "ON";
-
+    
+    // synopsys translate_off
+    integer fp_x;
+    integer fp_y;
+    reg         [21:0] cnt_xf;
+    reg         [21:0] cnt_yf;
+    initial begin
+        fp_x = $fopen("x read.txt");
+        cnt_xf = 0;
+        
+        forever begin
+            @( posedge clk);
+            if( ena_write_x ) begin
+                $fwrite(fp_x, "%h   ", ram_wdata);
+                cnt_xf = cnt_xf + 1;
+                if( cnt_xf % param_width_in == 0 )
+                    $fwrite(fp_x, "\n");
+            end
+            if( cnt_xf == param_length_in) begin
+                $fclose(fp_x);
+            end
+        end
+    end
+    initial begin
+        fp_y = $fopen("y read.txt");
+        cnt_yf = 0;
+        
+        forever begin
+            @( posedge clk);
+            if( ena_write_y ) begin
+                $fwrite(fp_y, "%h   ", ram_wdata);
+                cnt_yf = cnt_yf + 1;
+                if( cnt_yf % (param_width_in-2) == 0 )
+                    $fwrite(fp_y, "\n");
+            end
+            if( cnt_yf == param_length_out) begin
+                $fclose(fp_y);
+            end
+        end
+    end
+    // synopsys translate_on
 scfifo	SCFFY (
     .aclr           ( rst ),
     .clock          ( clk ),
-    .data           ( data[31:0] ),
+    .data           ( ram_wdata ),
     .rdreq          ( pxl_ena_y ),
     .sclr           ( 1'b0 ),
     .wrreq          ( ena_write_y ),
