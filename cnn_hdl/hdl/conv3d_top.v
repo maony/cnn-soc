@@ -12,20 +12,9 @@ module conv3d_top #(
     parameter DW = 128,
     parameter KS = 3
 )(
-    input               cfg_ena,
-    input      [AW-1:0] cfg_xbase,
-    input      [AW-1:0] cfg_ybase,
-    input      [AW-1:0] cfg_zbase,
-    input      [AW-1:0] cfg_xoffset,
-    input      [AW-1:0] cfg_yoffset,
-    input         [8:0] cfg_width_in,
-    input         [8:0] cfg_height_out,
-    input        [17:0] cfg_length_in,
-    input        [17:0] cfg_length_out,
-    
-    input               cfg_prefetch,
-    input      [AW-1:0] cfg_waddr,
-    input         [7:0] cfg_length_w,
+    input               config_ena,
+    input         [5:0] config_addr,
+    input        [31:0] config_data,
     
     output                          rmst_ctrl_fixed_location,
     output                 [AW-1:0] rmst_ctrl_read_base,
@@ -48,6 +37,20 @@ module conv3d_top #(
     input               clk,
     input               rst
 );
+wire               cfg_ena;
+wire      [AW-1:0] cfg_xbase;
+wire      [AW-1:0] cfg_ybase;
+wire      [AW-1:0] cfg_zbase;
+wire      [AW-1:0] cfg_xoffset;
+wire      [AW-1:0] cfg_yoffset;
+wire         [8:0] cfg_width_in;
+wire         [8:0] cfg_height_out;
+wire        [17:0] cfg_length_in;
+wire        [17:0] cfg_length_out;
+
+wire               cfg_prefetch;
+wire      [AW-1:0] cfg_waddr;
+wire         [7:0] cfg_length_w;
 
 wire              param_ena;
 wire     [AW-1:0] param_xaddr;
@@ -64,7 +67,37 @@ wire           [31:0] pxl_x;
 wire                  pxl_ena_y;
 wire           [31:0] pxl_y;
 
-conv3d_schedule SCHEDULE(
+conv3d_config #(
+    .AW ( AW )
+    ) CONFIG(
+    .config_ena     ( config_ena  ),
+    .config_addr    ( config_addr ),
+    .config_data    ( config_data ),
+    
+    .cfg_ena            ( cfg_ena        ),
+    .cfg_xbase          ( cfg_xbase      ),
+    .cfg_ybase          ( cfg_ybase      ),
+    .cfg_zbase          ( cfg_zbase      ),
+    .cfg_xoffset        ( cfg_xoffset    ),
+    .cfg_yoffset        ( cfg_yoffset    ),
+    .cfg_width_in       ( cfg_width_in   ),
+    .cfg_height_out     ( cfg_height_out ),
+    .cfg_length_in      ( cfg_length_in  ),
+    .cfg_length_out     ( cfg_length_out ),
+    
+    .cfg_prefetch    ( cfg_prefetch ),
+    .cfg_waddr       ( cfg_waddr    ),
+    .cfg_length_w    ( cfg_length_w ),
+
+    .rst( rst ),
+    .clk( clk )
+);
+
+conv3d_schedule #(
+    .AW ( AW ),
+    .DW ( DW ),
+    .KS ( KS )
+    )SCHEDULE(
     .cfg_ena            ( cfg_ena           ),
     .cfg_xbase          ( cfg_xbase         ),
     .cfg_ybase          ( cfg_ybase         ),
@@ -90,7 +123,11 @@ conv3d_schedule SCHEDULE(
     .rst( rst )
 );
 
-conv2d_rmem RMEM(
+conv2d_rmem # (
+    .AW ( AW ),
+    .DW ( DW ),
+    .KS ( KS )
+    )RMEM(
     .rmst_ctrl_fixed_location   ( rmst_ctrl_fixed_location ),
     .rmst_ctrl_read_base        ( rmst_ctrl_read_base      ),
     .rmst_ctrl_read_length      ( rmst_ctrl_read_length    ),
@@ -122,7 +159,11 @@ conv2d_rmem RMEM(
     .clk( rst )
 );
 
-conv2d_core CORE(
+conv2d_core #(
+    .AW ( AW ),
+    .DW ( DW ),
+    .KS ( KS )
+    )CORE(
     .param_ena         ( param_ena        ),
     .param_width_in    ( param_width_in   ),
     .param_height_out  ( param_height_out ),
@@ -140,7 +181,11 @@ conv2d_core CORE(
     .rst ( rst )
 );
 
-conv2d_wmem WMEM(
+conv2d_wmem #(
+    .AW ( AW ),
+    .DW ( DW ),
+    .KS ( KS )
+    )WMEM(
     .wmst_ctrl_fixed_location   ( wmst_ctrl_fixed_location ),
     .wmst_ctrl_write_base       ( wmst_ctrl_write_base     ),
     .wmst_ctrl_write_length     ( wmst_ctrl_write_length   ),
