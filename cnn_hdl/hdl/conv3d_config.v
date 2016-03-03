@@ -58,9 +58,11 @@ always @ ( posedge clk )
 always @ ( posedge clk )
     if( config_ena && (config_addr == WLENGTH) )
         cfg_length_w <= config_data[7:0];
-always @ ( posedge clk )    begin
+always @ ( posedge clk or posedge rst )    begin
     prefetch[1] <= prefetch[0];
-    if( config_ena && (config_addr == WPREFETCH) )
+    if( rst == 1'b1 )
+        prefetch[0] <= 1'b0;
+    else if( config_ena && (config_addr == WPREFETCH) )
         prefetch[0] <= config_data[0];
 end
 assign cfg_prefetch = (~prefetch[1]) & prefetch[0];
@@ -92,9 +94,11 @@ always @ ( posedge clk )
 always @ ( posedge clk )
     if( config_ena && (config_addr == LENGTH_OUT) )
         cfg_length_out <= config_data[AW-1:0];
-always @ ( posedge clk )    begin
+always @ ( posedge clk or posedge rst )    begin
     conv_run[1] <= conv_run[0];
-    if( config_ena && (config_addr == CONVRUN) )
+    if( rst == 1'b1 )
+        conv_run[0] <= 1'b0;
+    else if( config_ena && (config_addr == CONVRUN) )
         conv_run[0] <= config_data[0];
 end
 assign cfg_ena = (~conv_run[1]) & conv_run[0];
